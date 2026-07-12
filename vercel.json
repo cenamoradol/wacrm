@@ -1,0 +1,19 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/automations/cron",
+      "schedule": "* * * * *",
+      "headers": {
+        "x-cron-secret": "@automation_cron_secret"
+      }
+    },
+    {
+      "path": "/api/flows/cron",
+      "schedule": "*/5 * * * *",
+      "headers": {
+        "x-cron-secret": "@automation_cron_secret"
+      }
+    }
+  ]
+}
