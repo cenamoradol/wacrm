@@ -5,14 +5,14 @@
       "path": "/api/automations/cron",
       "schedule": "* * * * *",
       "headers": {
-        "x-cron-secret": "@automation_cron_secret"
+        "x-cron-secret": "c1cdf300ba"
       }
     },
     {
       "path": "/api/flows/cron",
       "schedule": "*/5 * * * *",
       "headers": {
-        "x-cron-secret": "@automation_cron_secret"
+        "x-cron-secret": "c1cdf300ba"
       }
     }
   ]
