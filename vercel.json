@@ -3,17 +3,11 @@
   "crons": [
     {
       "path": "/api/automations/cron",
-      "schedule": "* * * * *",
-      "headers": {
-        "x-cron-secret": "c1cdf300ba"
-      }
+      "schedule": "* * * * *"
     },
     {
       "path": "/api/flows/cron",
-      "schedule": "*/5 * * * *",
-      "headers": {
-        "x-cron-secret": "c1cdf300ba"
-      }
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -31,11 +31,19 @@ export async function GET(request: Request) {
   if (!expected) {
     return NextResponse.json({ error: 'cron not configured' }, { status: 503 })
   }
+  // Accept either the legacy `x-cron-secret` header or the
+  // `Authorization: Bearer` scheme (Vercel Cron uses the latter when
+  // the project's `CRON_SECRET` env var is set).
+  const bearer = request.headers.get('authorization')
+  const legacy = request.headers.get('x-cron-secret')
+  const supplied =
+    bearer && bearer.toLowerCase().startsWith('bearer ')
+      ? bearer.slice(7)
+      : legacy ?? ''
   // Constant-time compare so an attacker who can hit the endpoint
   // can't recover the secret byte-by-byte from response-time deltas.
   // Length pre-check is required by timingSafeEqual (throws otherwise)
   // and leaks only the length itself, which isn't sensitive.
-  const supplied = request.headers.get('x-cron-secret') ?? ''
   const suppliedBuf = Buffer.from(supplied)
   const expectedBuf = Buffer.from(expected)
   if (
