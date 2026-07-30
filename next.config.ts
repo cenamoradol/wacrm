@@ -70,6 +70,25 @@ const nextConfig: NextConfig = {
   output: "standalone",
 
   /**
+   * Force-include @swc/helpers/esm into the standalone trace.
+   *
+   * Why: @swc/helpers' package.json points `module` to `esm/index.js`,
+   * but Next.js's static output-file tracer only follows CommonJS
+   * resolution, so the standalone build copies `cjs/` + `package.json`
+   * and skips `esm/`. At runtime Next.js's require hook tries to load
+   * `esm/_interop_require_default.js` and crashes with MODULE_NOT_FOUND.
+   *
+   * Without this, every cold deploy on Railway / Docker crashes at
+   * `node server.js` even though `next build` succeeds. Including the
+   * whole `esm/` subtree is the documented escape hatch — about 50 files,
+   * a few KB — and only affects what's bundled in the standalone image,
+   * not the regular dev / non-standalone build.
+   */
+  outputFileTracingIncludes: {
+    "/": ["./node_modules/@swc/helpers/esm/**/*"],
+  },
+
+  /**
    * Cross-origin dev access (Next.js 16).
    *
    * Next 16 blocks requests to dev-only resources (`/_next/*` internals,
