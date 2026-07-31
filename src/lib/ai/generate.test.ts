@@ -192,3 +192,83 @@ describe('generateReply — Anthropic', () => {
     expect(body.messages).toHaveLength(1)
   })
 })
+
+describe('generateReply — MiniMax', () => {
+  it('hits api.minimax.io with the OpenAI-compatible body shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        choices: [{ message: { content: 'Hola, claro que sí.' } }],
+        usage: { prompt_tokens: 18, completion_tokens: 7, total_tokens: 25 },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const res = await generateReply({
+      config: config({ provider: 'minimax', apiKey: 'minimax-key', model: 'MiniMax-M2' }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'Hola' }],
+    })
+
+    expect(res).toEqual({
+      text: 'Hola, claro que sí.',
+      handoff: false,
+      usage: { promptTokens: 18, completionTokens: 7, totalTokens: 25 },
+    })
+    const [url, opts] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.minimax.io/v1/chat/completions')
+    expect(opts.method).toBe('POST')
+    expect(opts.headers.Authorization).toBe('Bearer minimax-key')
+    expect(opts.headers['Content-Type']).toBe('application/json')
+    const body = JSON.parse(opts.body)
+    expect(body.model).toBe('MiniMax-M2')
+    // System prompt is merged as the first message, same as OpenAI.
+    expect(body.messages[0]).toEqual({ role: 'system', content: 'sys' })
+    expect(body.messages[1]).toEqual({ role: 'user', content: 'Hola' })
+  })
+
+  it('maps a 401 to an invalid_key AiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        errResponse(401, { error: { message: 'Unauthorized' } }),
+      ),
+    )
+    await expect(
+      generateReply({
+        config: config({ provider: 'minimax', apiKey: 'bad' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_key', status: 401 })
+  })
+
+  it('throws on an empty completion', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(okResponse({ choices: [{ message: { content: '' } }] })),
+    )
+    await expect(
+      generateReply({
+        config: config({ provider: 'minimax' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    ).rejects.toBeInstanceOf(AiError)
+  })
+
+  it('parses handoff sentinel from MiniMax output', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({ choices: [{ message: { content: '[[HANDOFF]]' } }] }),
+      ),
+    )
+    const res = await generateReply({
+      config: config({ provider: 'minimax' }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'hablar con humano' }],
+    })
+    expect(res.handoff).toBe(true)
+    expect(res.text).toBe('')
+  })
+})
