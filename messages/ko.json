@@ -870,6 +870,10 @@
         "time_based": {
           "label": "시간 기반",
           "hint": "반복 일정에 따라"
+        },
+        "llm_condition": {
+          "label": "LLM 조건",
+          "hint": "LLM이 자연어 조건을 true로 평가했을 때"
         }
       },
       "trigger": "트리거",
@@ -881,6 +885,9 @@
       "replyIdsHelp": "정확히 일치시킬 버튼/목록 행 id를 쉼표로 구분해 입력하세요. 버튼 보내기 / 목록 보내기 단계에서 설정한 것과 같은 id를 사용하세요.",
       "schedule": "일정",
       "scheduleHint": "Cron 표현식 (예: 0 9 * * 1-5)",
+      "conditionPromptLabel": "조건 프롬프트",
+      "conditionPromptPlaceholder": "고객이 차량 재고를 문의하고 있습니다",
+      "conditionPromptHint": "자연어 조건을 입력하세요. LLM이 최근 메시지를 읽고 YES/NO로 답합니다. AI 어시스턴트 설정이 필요합니다.",
       "active": "활성",
       "activeAria": "활성",
       "save": "저장",
@@ -973,7 +980,11 @@
         "matchType": "일치 유형",
         "matchContains": "포함",
         "matchExact": "정확히 일치",
-        "closeConversationHint": "대화 상태를 \"닫힘\"으로 설정합니다. 추가 설정이 필요 없습니다."
+        "closeConversationHint": "대화 상태를 \"닫힘\"으로 설정합니다. 추가 설정이 필요 없습니다.",
+        "webhookResponseHint": "웹훅 응답(파싱된 JSON 또는 원시 텍스트)은 vars.webhook_response에 저장되고 상태 코드는 vars.webhook_status에 저장됩니다. 템플릿 플레이스홀더나 후속 LLM 드래프트 스텝에서 참조할 수 있습니다.",
+        "llmDraftPromptLabel": "LLM 프롬프트",
+        "llmDraftPromptPlaceholder": "고객이 재고를 문의했습니다. vars.webhook_response.results를 사용해 사용 가능한 항목을 나열하세요.",
+        "llmDraftPromptHint": "LLM은 이 프롬프트 + 최근 대화 + 누적된 모든 vars(이전 send_webhook 스텝의 vars.webhook_response 포함)를 받습니다. AI 어시스턴트 설정이 필요합니다."
       }
     }
   },

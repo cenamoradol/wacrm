@@ -439,7 +439,12 @@ export type AutomationTriggerType =
   | 'time_based'
   /** Customer tapped a reply button / list row whose id matches; lets
    *  multi-step menus be chained across automations. */
-  | 'interactive_reply';
+  | 'interactive_reply'
+  /** LLM evaluates a natural-language condition against the recent
+   *  message. Fires when the LLM says YES. Requires the account's AI
+   *  assistant to be configured. Universal trigger — the user can write
+   *  any condition in plain Spanish/English/etc. and the LLM decides. */
+  | 'llm_condition';
 
 export type AutomationStepType =
   | 'send_message'
@@ -454,7 +459,12 @@ export type AutomationStepType =
   | 'wait'
   | 'condition'
   | 'send_webhook'
-  | 'close_conversation';
+  | 'close_conversation'
+  /** LLM composes a WhatsApp reply using the configured prompt + all
+   *  accumulated vars (including `vars.webhook_response` from a prior
+   *  send_webhook step) + recent conversation. Use after a webhook
+   *  fetch to turn structured data into a natural reply. */
+  | 'llm_draft_message';
 
 export type AutomationLogStatus = 'success' | 'partial' | 'failed';
 
@@ -479,12 +489,31 @@ export interface InteractiveReplyTriggerConfig {
   reply_ids: string[];
 }
 
+/**
+ * LLM-evaluated trigger config. The LLM reads the customer's recent
+ * message (and short conversation context) and decides whether the
+ * `condition_prompt` is satisfied. Reply YES/NO → automation runs.
+ *
+ * Examples:
+ *  - "El cliente pregunta por inventario de vehículos"
+ *  - "El cliente está molesto o frustrado"
+ *  - "El cliente pide hablar con un humano"
+ *
+ * Requires the account's AI assistant to be configured (`ai_configs`
+ * row with is_active = true). One LLM call per matching automation
+ * per inbound — see `src/lib/automations/llm-condition.ts`.
+ */
+export interface LlmConditionTriggerConfig {
+  condition_prompt: string;
+}
+
 export type AutomationTriggerConfig =
   | Record<string, never>
   | KeywordMatchTriggerConfig
   | TagTriggerConfig
   | TimeBasedTriggerConfig
   | InteractiveReplyTriggerConfig
+  | LlmConditionTriggerConfig
   | Record<string, unknown>;
 
 export interface SendMessageStepConfig {
@@ -559,6 +588,21 @@ export interface SendWebhookStepConfig {
   body_template?: string;
 }
 
+/**
+ * LLM-drafted message step. The LLM composes a WhatsApp reply using:
+ *  - the configured `prompt` (instructions / tone / what to extract)
+ *  - `vars.webhook_response` from any prior send_webhook step (parsed
+ *    JSON or raw string, depending on the webhook's response)
+ *  - the recent conversation history
+ *
+ * Universal: any automation that has structured data to surface (from
+ * an external API) can use this to turn it into a natural reply
+ * without pre-baking a template.
+ */
+export interface LlmDraftStepConfig {
+  prompt: string;
+}
+
 export type AutomationStepConfig =
   | SendMessageStepConfig
   | SendButtonsStepConfig
@@ -571,6 +615,7 @@ export type AutomationStepConfig =
   | WaitStepConfig
   | ConditionStepConfig
   | SendWebhookStepConfig
+  | LlmDraftStepConfig
   | Record<string, never>
   | Record<string, unknown>;
 

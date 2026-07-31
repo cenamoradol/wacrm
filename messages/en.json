@@ -870,6 +870,10 @@
         "time_based": {
           "label": "Time-Based",
           "hint": "On a recurring schedule"
+        },
+        "llm_condition": {
+          "label": "LLM Condition",
+          "hint": "When an LLM evaluates a natural-language condition as true"
         }
       },
       "trigger": "Trigger",
@@ -881,6 +885,9 @@
       "replyIdsHelp": "Comma-separated button/list-row ids to match, exact. Use the same ids you set on a Send Buttons / Send List step.",
       "schedule": "Schedule",
       "scheduleHint": "Cron expression (e.g. 0 9 * * 1-5)",
+      "conditionPromptLabel": "Condition prompt",
+      "conditionPromptPlaceholder": "The customer is asking about vehicle inventory",
+      "conditionPromptHint": "Write any natural-language condition. The LLM reads the customer's most recent message and decides YES or NO. Examples: 'The customer is upset', 'The customer wants to speak with a human'. Requires AI Assistant to be configured.",
       "active": "Active",
       "activeAria": "Active",
       "save": "Save",
@@ -973,7 +980,11 @@
         "matchType": "Match type",
         "matchContains": "Contains",
         "matchExact": "Exact",
-        "closeConversationHint": "Sets the conversation status to \"closed\". No configuration needed."
+        "closeConversationHint": "Sets the conversation status to \"closed\". No configuration needed.",
+        "webhookResponseHint": "The webhook response (parsed JSON or raw text) is stored in vars.webhook_response and the status in vars.webhook_status. Reference them in template placeholders or in a downstream LLM draft step.",
+        "llmDraftPromptLabel": "LLM prompt",
+        "llmDraftPromptPlaceholder": "The customer asked about inventory. Use vars.webhook_response.results to list what's available.",
+        "llmDraftPromptHint": "The LLM receives this prompt + the recent conversation + all accumulated vars (including vars.webhook_response from any send_webhook step above). Requires AI Assistant to be configured."
       }
     }
   },

@@ -104,7 +104,48 @@ vi.mock("./meta-send", () => ({
   engineSendInteractive: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
 }));
 
+// Mock the LLM helpers so we don't make real provider calls in tests.
+vi.mock("./llm-condition", () => ({
+  evaluateLlmCondition: vi.fn(async () => ({ boolean: true, reasoning: "test" })),
+}));
+vi.mock("@/lib/ai/config", () => ({
+  loadAiConfig: vi.fn(async () => ({
+    provider: "openai",
+    model: "gpt-test",
+    apiKey: "sk-test",
+    systemPrompt: null,
+    isActive: true,
+    autoReplyEnabled: false,
+    autoReplyMaxPerConversation: 3,
+    handoffAgentId: null,
+    embeddingsApiKey: null,
+  })),
+}));
+vi.mock("@/lib/ai/generate", () => ({
+  generateReply: vi.fn(async () => ({
+    text: "Composed by LLM.",
+    handoff: false,
+    usage: null,
+  })),
+}));
+vi.mock("@/lib/ai/context", () => ({
+  buildConversationContext: vi.fn(async () => []),
+}));
+
+// SSRF guard does real DNS resolution; mock it so we can flip it per test
+// (the existing GHSA test relies on it returning false for private hosts,
+// while the new tests need it to return true so the engine actually
+// reaches the fetch call).
+vi.mock("@/lib/webhooks/ssrf", () => ({
+  isDeliverableUrl: vi.fn(async () => true),
+}));
+
 import { runAutomationsForTrigger, triggerMatches } from "./engine";
+import { evaluateLlmCondition } from "./llm-condition";
+import { generateReply } from "@/lib/ai/generate";
+import { loadAiConfig } from "@/lib/ai/config";
+import { engineSendText } from "./meta-send";
+import { isDeliverableUrl } from "@/lib/webhooks/ssrf";
 import type { Automation } from "@/types";
 
 const ACCOUNT = "acct-1";
@@ -281,6 +322,9 @@ describe("send_webhook — SSRF guard (GHSA-8jqh-598v-rfxc)", () => {
   it("refuses a private / link-local destination and never calls fetch", async () => {
     const fetchSpy = vi.fn(async () => ({ ok: true, status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
+    // For this test the SSRF guard must REFUSE — flip the default mock
+    // back to its real-world behaviour for private hosts.
+    vi.mocked(isDeliverableUrl).mockResolvedValueOnce(false);
 
     h.state.owned = { id: "c1" };
     h.state.automations = [automationWithUpdateStep()];
@@ -364,27 +408,27 @@ describe("triggerMatches — interactive_reply", () => {
     };
   }
 
-  it("matches when the tapped id is in reply_ids (exact)", () => {
+  it("matches when the tapped id is in reply_ids (exact)", async () => {
     expect(
-      triggerMatches(automation(["yes", "no"]), { interactive_reply_id: "yes" }),
+      await triggerMatches(automation(["yes", "no"]), { interactive_reply_id: "yes" }),
     ).toBe(true);
   });
 
-  it("does not match a different id", () => {
+  it("does not match a different id", async () => {
     expect(
-      triggerMatches(automation(["yes"]), { interactive_reply_id: "maybe" }),
+      await triggerMatches(automation(["yes"]), { interactive_reply_id: "maybe" }),
     ).toBe(false);
   });
 
-  it("does not match on a substring (exact only)", () => {
+  it("does not match on a substring (exact only)", async () => {
     expect(
-      triggerMatches(automation(["yes"]), { interactive_reply_id: "yes_please" }),
+      await triggerMatches(automation(["yes"]), { interactive_reply_id: "yes_please" }),
     ).toBe(false);
   });
 
-  it("does not match when no reply id is present or config is empty", () => {
-    expect(triggerMatches(automation(["yes"]), {})).toBe(false);
-    expect(triggerMatches(automation([]), { interactive_reply_id: "yes" })).toBe(false);
+  it("does not match when no reply id is present or config is empty", async () => {
+    expect(await triggerMatches(automation(["yes"]), {})).toBe(false);
+    expect(await triggerMatches(automation([]), { interactive_reply_id: "yes" })).toBe(false);
   });
 });
 
@@ -404,15 +448,15 @@ describe("triggerMatches — tag_added", () => {
     };
   }
 
-  it("matches only the exact tag id", () => {
-    expect(triggerMatches(automation("tag-a"), { tag_id: "tag-a" })).toBe(true);
-    expect(triggerMatches(automation("tag-a"), { tag_id: "tag-ab" })).toBe(false);
+  it("matches only the exact tag id", async () => {
+    expect(await triggerMatches(automation("tag-a"), { tag_id: "tag-a" })).toBe(true);
+    expect(await triggerMatches(automation("tag-a"), { tag_id: "tag-ab" })).toBe(false);
   });
 
-  it("fails closed when the config or event tag is missing", () => {
-    expect(triggerMatches(automation(), { tag_id: "tag-a" })).toBe(false);
-    expect(triggerMatches(automation("tag-a"), {})).toBe(false);
-    expect(triggerMatches(automation("tag-a"), undefined)).toBe(false);
+  it("fails closed when the config or event tag is missing", async () => {
+    expect(await triggerMatches(automation(), { tag_id: "tag-a" })).toBe(false);
+    expect(await triggerMatches(automation("tag-a"), {})).toBe(false);
+    expect(await triggerMatches(automation("tag-a"), undefined)).toBe(false);
   });
 });
 
@@ -448,5 +492,350 @@ describe("tag_added — conversation policy", () => {
       status: "failed",
       error_message: "tag_added automation cannot send: contact has no existing conversation",
     }));
+  });
+});
+
+// ============================================================
+// send_webhook — captures the response into vars for downstream
+// steps (template interpolation + llm_draft_message consumers).
+// ============================================================
+describe("send_webhook — response capture into vars", () => {
+  it("stores parsed JSON body in vars.webhook_response and status in vars.webhook_status", async () => {
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ vehicles: [{ id: 1, model: "CRV" }] }),
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    h.state.owned = { id: "c1" };
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "inventory webhook",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }];
+    // Two steps: webhook + send_message that interpolates from the response.
+    h.state.steps = [
+      {
+        id: "s1",
+        automation_id: "a1",
+        step_type: "send_webhook",
+        position: 0,
+        parent_step_id: null,
+        step_config: { url: "https://example.test/inventory", body_template: "{}" },
+      },
+      {
+        id: "s2",
+        automation_id: "a1",
+        step_type: "send_message",
+        position: 1,
+        parent_step_id: null,
+        // Nested-path interpolation should resolve to the captured JSON field.
+        step_config: { text: "Vehicles: {{ vars.webhook_response.vehicles[0].model }}" },
+      },
+    ];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: {
+        message_text: "what do you have?",
+        conversation_id: "conv-1",
+      },
+    });
+
+    // The webhook was called.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    // The downstream send_message step ran with interpolated text — proving
+    // the JSON body flowed into vars AND the nested-path resolver worked.
+    const sendTextMock = vi.mocked(engineSendText);
+    expect(sendTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Vehicles: CRV" }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("stores the raw text when the response is not JSON", async () => {
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => "plain text body",
+    }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    h.state.owned = { id: "c1" };
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "non-json webhook",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }];
+    h.state.steps = [
+      {
+        id: "s1",
+        automation_id: "a1",
+        step_type: "send_webhook",
+        position: 0,
+        parent_step_id: null,
+        step_config: { url: "https://example.test/", body_template: "{}" },
+      },
+      {
+        id: "s2",
+        automation_id: "a1",
+        step_type: "send_message",
+        position: 1,
+        parent_step_id: null,
+        step_config: { text: "Body: {{ vars.webhook_response }}" },
+      },
+    ];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: { conversation_id: "conv-1" },
+    });
+
+    expect(vi.mocked(engineSendText)).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Body: plain text body" }),
+    );
+    vi.unstubAllGlobals();
+  });
+});
+
+// ============================================================
+// triggerMatches — llm_condition: LLM-evaluated natural-language
+// condition. The provider call is mocked; we only verify that the
+// result is threaded back into the boolean decision.
+// ============================================================
+describe("triggerMatches — llm_condition", () => {
+  function automation(prompt: string): Automation {
+    return {
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "smart condition",
+      trigger_type: "llm_condition",
+      trigger_config: { condition_prompt: prompt },
+      is_active: true,
+      execution_count: 0,
+      created_at: "",
+      updated_at: "",
+    };
+  }
+
+  it("matches when the LLM says YES", async () => {
+    vi.mocked(evaluateLlmCondition).mockResolvedValueOnce({ boolean: true });
+    expect(
+      await triggerMatches(automation("Customer is upset"), {
+        message_text: "I'm really frustrated with this",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not match when the LLM says NO", async () => {
+    vi.mocked(evaluateLlmCondition).mockResolvedValueOnce({ boolean: false });
+    expect(
+      await triggerMatches(automation("Customer is upset"), {
+        message_text: "all good, thanks!",
+      }),
+    ).toBe(false);
+  });
+
+  it("fails closed when no condition_prompt is configured", async () => {
+    expect(
+      await triggerMatches(automation(""), { message_text: "hi" }),
+    ).toBe(false);
+  });
+
+  it("fails closed when no message text is present", async () => {
+    expect(
+      await triggerMatches(automation("anything"), {}),
+    ).toBe(false);
+  });
+
+  it("treats LLM errors as no-match (does not crash)", async () => {
+    vi.mocked(evaluateLlmCondition).mockRejectedValueOnce(new Error("provider down"));
+    expect(
+      await triggerMatches(automation("anything"), {
+        message_text: "hi",
+      }),
+    ).toBe(false);
+  });
+});
+
+// ============================================================
+// llm_draft_message step: composes a WhatsApp reply from a prompt +
+// accumulated vars (including vars.webhook_response) and sends it.
+// ============================================================
+describe("llm_draft_message step", () => {
+  beforeEach(() => {
+    vi.mocked(loadAiConfig).mockResolvedValue({
+      provider: "openai",
+      model: "gpt-test",
+      apiKey: "sk-test",
+      systemPrompt: null,
+      isActive: true,
+      autoReplyEnabled: false,
+      autoReplyMaxPerConversation: 3,
+      handoffAgentId: null,
+      embeddingsApiKey: null,
+    });
+    vi.mocked(generateReply).mockResolvedValue({
+      text: "Sí, tenemos 3 Honda CR-V 2017.",
+      handoff: false,
+      usage: null,
+    });
+  });
+
+  it("runs the LLM with the configured prompt and sends the composed text", async () => {
+    h.state.owned = { id: "c1" };
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "compose reply",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }];
+    h.state.steps = [{
+      id: "s1",
+      automation_id: "a1",
+      step_type: "llm_draft_message",
+      position: 0,
+      parent_step_id: null,
+      step_config: { prompt: "Use vars.webhook_response to answer about CRV 2017." },
+    }];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: {
+        message_text: "tienes CRV 2017?",
+        conversation_id: "conv-1",
+        // Simulate a prior send_webhook step having captured data.
+        vars: {
+          webhook_response: { count: 3, model: "CRV" },
+          webhook_status: 200,
+        },
+      },
+    });
+
+    // generateReply was called once with the prompt.
+    expect(vi.mocked(generateReply)).toHaveBeenCalledTimes(1);
+    const callArgs = vi.mocked(generateReply).mock.calls[0][0];
+    expect(callArgs.config.model).toBe("gpt-test");
+    // The system prompt must include the configured prompt instructions so
+    // the LLM can act on them, and the AVAILABLE DATA section that exposes
+    // the accumulated vars (including vars.webhook_response).
+    expect(callArgs.systemPrompt).toContain("AVAILABLE DATA:");
+    expect(callArgs.systemPrompt).toContain('"webhook_response"');
+    expect(callArgs.systemPrompt).toContain('"count": 3');
+    expect(callArgs.systemPrompt).toContain('"model": "CRV"');
+
+    // The composed text is sent via WhatsApp.
+    expect(vi.mocked(engineSendText)).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Sí, tenemos 3 Honda CR-V 2017." }),
+    );
+  });
+
+  it("fails clearly when no AI config is configured for the account", async () => {
+    vi.mocked(loadAiConfig).mockResolvedValueOnce(null);
+
+    h.state.owned = { id: "c1" };
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "compose reply",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }];
+    h.state.steps = [{
+      id: "s1",
+      automation_id: "a1",
+      step_type: "llm_draft_message",
+      position: 0,
+      parent_step_id: null,
+      step_config: { prompt: "Anything." },
+    }];
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: {},
+    });
+
+    // Step failed; engineSendText was NOT called.
+    expect(vi.mocked(engineSendText)).not.toHaveBeenCalled();
+    expect(h.state.logUpdates).toContainEqual(expect.objectContaining({
+      status: "failed",
+      error_message: expect.stringContaining("AI Assistant"),
+    }));
+  });
+});
+
+// ============================================================
+// interpolate() — nested-path resolution into webhook_response.
+// Tested indirectly via send_webhook body_template so we don't need
+// to export the helper just for tests.
+// ============================================================
+describe("interpolate — nested vars.* paths", () => {
+  async function captureSentBodyFromTemplate(template: string): Promise<string> {
+    let captured: string | undefined
+    const fetchSpy = vi.fn(async (_url: string, init: { body: string }) => {
+      captured = init.body
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true }),
+      }
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+
+    h.state.owned = { id: "c1" }
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "tpl",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }]
+    h.state.steps = [{
+      id: "s1",
+      automation_id: "a1",
+      step_type: "send_webhook",
+      position: 0,
+      parent_step_id: null,
+      step_config: { url: "https://example.test/", body_template: template },
+    }]
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: { message_text: "hi" },
+    })
+    vi.unstubAllGlobals()
+    return captured ?? ""
+  }
+
+  it("resolves {{ vars.foo.bar }} when set via the trigger context vars", async () => {
+    const body = await captureSentBodyFromTemplate('{"v":"{{ vars.payload.value }}"}');
+    // No payload in context, so interpolation should produce an empty string.
+    expect(body).toBe('{"v":""}');
   });
 });

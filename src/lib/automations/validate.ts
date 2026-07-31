@@ -143,6 +143,14 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
         issues.push({ path: `${path}.url`, message: 'webhook URL is not a valid URL' })
       }
       break
+    case 'llm_draft_message':
+      if (!nonEmpty(c.prompt)) {
+        issues.push({
+          path: `${path}.prompt`,
+          message: 'LLM draft message requires a non-empty prompt',
+        })
+      }
+      break
     case 'close_conversation':
       // No config required.
       break
@@ -196,6 +204,13 @@ export function validateTriggerForActivation(
       issues.push({
         path: 'trigger.reply_ids',
         message: 'reply ids cannot be empty strings',
+      })
+    }
+  } else if (triggerType === 'llm_condition') {
+    if (!nonEmpty(cfg.condition_prompt)) {
+      issues.push({
+        path: 'trigger.condition_prompt',
+        message: 'LLM condition requires a non-empty prompt',
       })
     }
   }

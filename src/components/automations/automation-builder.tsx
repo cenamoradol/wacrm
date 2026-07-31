@@ -33,6 +33,7 @@ import {
   ArrowUp,
   MousePointerClick,
   List,
+  Sparkles,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -111,6 +112,7 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   condition: { label: "condition", icon: GitBranch, border: "border-l-amber-500" },
   send_webhook: { label: "send_webhook", icon: Webhook, border: "border-l-primary" },
   close_conversation: { label: "close_conversation", icon: CircleSlash, border: "border-l-primary" },
+  llm_draft_message: { label: "llm_draft_message", icon: Sparkles, border: "border-l-primary" },
 }
 
 const ADDABLE_STEPS: AutomationStepType[] = [
@@ -126,6 +128,7 @@ const ADDABLE_STEPS: AutomationStepType[] = [
   "wait",
   "condition",
   "send_webhook",
+  "llm_draft_message",
   "close_conversation",
 ]
 
@@ -138,6 +141,7 @@ const TRIGGER_OPTIONS: { value: AutomationTriggerType }[] = [
   { value: "conversation_assigned" },
   { value: "tag_added" },
   { value: "time_based" },
+  { value: "llm_condition" },
 ]
 
 function cid(): string {
@@ -186,6 +190,8 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
       return { subject: "tag_presence", operand: "", value: "" }
     case "send_webhook":
       return { url: "", headers: {}, body_template: "" }
+    case "llm_draft_message":
+      return { prompt: "" }
     case "close_conversation":
       return {}
     default:
@@ -878,6 +884,24 @@ function TriggerCard({
                 </p>
               </div>
             )}
+            {type === "llm_condition" && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  {t("conditionPromptLabel")}
+                </label>
+                <Textarea
+                  value={(config.condition_prompt as string) ?? ""}
+                  onChange={(e) =>
+                    onConfigChange({ ...config, condition_prompt: e.target.value })
+                  }
+                  placeholder={t("conditionPromptPlaceholder")}
+                  className="min-h-20 bg-muted text-foreground"
+                />
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {t("conditionPromptHint")}
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1477,6 +1501,31 @@ function StepEditor({
               onChange={(e) => set({ body_template: e.target.value })}
               className="min-h-20 bg-muted font-mono text-xs text-foreground"
             />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("config.webhookResponseHint", {
+                defaultValue:
+                  "The webhook response (parsed JSON or raw text) is stored in vars.webhook_response and the status in vars.webhook_status. Reference them in template placeholders or in a downstream LLM draft step.",
+              })}
+            </p>
+          </FieldBlock>
+        </>
+      )
+    case "llm_draft_message":
+      return (
+        <>
+          <FieldBlock label={t("config.llmDraftPromptLabel")}>
+            <Textarea
+              value={(cfg.prompt as string) ?? ""}
+              onChange={(e) => set({ prompt: e.target.value })}
+              placeholder={t("config.llmDraftPromptPlaceholder")}
+              className="min-h-24 bg-muted text-foreground"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("config.llmDraftPromptHint", {
+                defaultValue:
+                  "The LLM receives this prompt + the recent conversation + all accumulated vars (including vars.webhook_response from any send_webhook step above). Requires AI Assistant to be configured.",
+              })}
+            </p>
           </FieldBlock>
         </>
       )

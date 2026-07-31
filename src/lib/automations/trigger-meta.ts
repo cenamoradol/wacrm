@@ -39,6 +39,11 @@ export const TRIGGER_META: Record<AutomationTriggerType, TriggerMeta> = {
     label: 'Button / List Reply',
     pillClass: 'border-pink-500/30 bg-pink-500/10 text-pink-300',
   },
+  llm_condition: {
+    // Same amber as the `condition` step — visually signals "judgment call".
+    label: 'LLM Condition',
+    pillClass: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+  },
 }
 
 export function triggerMeta(t: AutomationTriggerType | string): TriggerMeta {
