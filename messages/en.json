@@ -823,6 +823,7 @@
       "backAria": "Back"
     },
     "builder": {
+      "delete": "Delete",
       "steps": {
         "send_message": "Send Message",
         "send_buttons": "Send Buttons",

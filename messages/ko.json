@@ -823,6 +823,7 @@
       "backAria": "뒤로"
     },
     "builder": {
+      "delete": "삭제",
       "steps": {
         "send_message": "메시지 보내기",
         "send_buttons": "버튼 보내기",
