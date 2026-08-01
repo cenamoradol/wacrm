@@ -108,6 +108,16 @@ export async function engineSendImage(
 
   const accessToken = decrypt(config.access_token)
 
+  // Diagnostic dump so we can see why a send might look successful in
+  // the DB but never reach the recipient. The user reported the inbox
+  // showing the message but WhatsApp not delivering — usually means
+  // Meta's downstream queue dropped it (24h session closed, quality
+  // rating, etc.) without raising an error to our HTTP call. Log
+  // everything we know so we can pin it down from the server logs.
+  console.log(
+    `[automations] engineSendImage to=${sanitized} phone_number_id=${config.phone_number_id} url=${args.imageUrl.slice(0, 120)} caption_len=${args.caption?.length ?? 0}`,
+  )
+
   const attempt = async (phone: string): Promise<string> => {
     const r = await sendMediaMessage({
       phoneNumberId: config.phone_number_id,
@@ -117,6 +127,9 @@ export async function engineSendImage(
       link: args.imageUrl,
       caption: args.caption || undefined,
     })
+    console.log(
+      `[automations] engineSendImage ok phone=${phone} message_id=${r.messageId}`,
+    )
     return r.messageId
   }
 
@@ -287,11 +300,13 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
       break
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      console.warn(
+        `[automations] sendViaMeta variant ${v} failed: ${msg.slice(0, 300)}`,
+      )
       if (!isRecipientNotAllowedError(msg)) throw err
       lastError = err
     }
   }
-  if (lastError) throw lastError
 
   if (workingPhone !== sanitized) {
     await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
