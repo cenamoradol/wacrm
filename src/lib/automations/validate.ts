@@ -188,6 +188,25 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
         }
       }
       break
+    case 'send_images':
+      if (!nonEmpty(c.image_path)) {
+        issues.push({
+          path: `${path}.image_path`,
+          message: 'send_images requires an image_path with [*] wildcards',
+        })
+      }
+      if (
+        c.max_images !== undefined &&
+        (typeof c.max_images !== 'number' ||
+          !Number.isFinite(c.max_images) ||
+          c.max_images < 1)
+      ) {
+        issues.push({
+          path: `${path}.max_images`,
+          message: 'max_images must be a positive number',
+        })
+      }
+      break
     case 'close_conversation':
       // No config required.
       break

@@ -11,6 +11,7 @@ import type {
   LlmDraftStepConfig,
   ExtractVarsStepConfig,
   ExtractVarsFieldType,
+  SendImagesStepConfig,
   SendMessageStepConfig,
   SendButtonsStepConfig,
   SendListStepConfig,
@@ -25,7 +26,7 @@ import type {
 import { supabaseAdmin } from './admin-client'
 import { addContactTagIfAbsent } from '@/lib/contacts/tag-write'
 import { MAX_TAG_CHAIN_DEPTH, getTagChainDepth } from '@/lib/contacts/tag-chain'
-import { engineSendText, engineSendTemplate, engineSendInteractive } from './meta-send'
+import { engineSendText, engineSendTemplate, engineSendInteractive, engineSendImage } from './meta-send'
 import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 import { loadAiConfig } from '@/lib/ai/config'
@@ -839,6 +840,50 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       return `extract_vars: wrote ${writtenKeys.join(', ')}`
     }
 
+    case 'send_images': {
+      // Universal image-message step: iterate `image_path` (supports
+      // [*] wildcard) and send one WhatsApp image per resolved URL,
+      // each with its own optional caption rendered via the `loop.*`
+      // scope (e.g. {{ loop.index }}. {{ loop.title }}). The whole
+      // thing falls inside one STEP result row, with the count of
+      // messages sent in the detail line.
+      const cfg = step.step_config as SendImagesStepConfig
+      if (!cfg.image_path || !cfg.image_path.trim()) {
+        throw new Error('send_images needs image_path')
+      }
+      if (!args.contactId) throw new Error('send_images needs a contact')
+      const limit = Math.max(1, Math.floor(cfg.max_images ?? 5))
+
+      const iterations = expandWildcardPath(
+        args.context.vars ?? {},
+        cfg.image_path,
+      )
+      const limited = iterations.slice(0, limit)
+      if (limited.length === 0) {
+        return `send_images: 0 URLs from path "${cfg.image_path}"`
+      }
+
+      const conversationId = await resolveConversationId(args)
+      const captionTemplate = cfg.caption ?? ''
+
+      const sent: string[] = []
+      for (const { index, item, value: imageUrl } of limited) {
+        const caption = captionTemplate
+          ? interpolate(captionTemplate, args, { item, index })
+          : undefined
+        const { whatsapp_message_id } = await engineSendImage({
+          accountId: args.automation.account_id,
+          userId: args.automation.user_id,
+          conversationId,
+          contactId: args.contactId,
+          imageUrl,
+          caption,
+        })
+        sent.push(whatsapp_message_id)
+      }
+      return `send_images: sent ${sent.length} image${sent.length === 1 ? '' : 's'} (cap=${limit})`
+    }
+
     default:
       return `unknown step: ${step.step_type}`
   }
@@ -1097,11 +1142,16 @@ function resolvePath(root: unknown, parts: Array<string | number>): unknown {
  *  - `{{ vars.foo }}` — top-level var
  *  - `{{ vars.webhook_response.field }}` — nested object
  *  - `{{ vars.webhook_response.list[0].name }}` — array index
+ *  - `{{ loop.index }}` — 1-based index of the current iteration
+ *    (only meaningful inside `send_images` caption evaluation;
+ *    outside it, resolves to empty)
+ *  - `{{ loop.<field> }}` — field on the current array item, e.g.
+ *    `{{ loop.title }}` reads `currentItem.title`
  *
  * Unknown / partial paths resolve to empty string so a typo in a
  * template silently produces a blank rather than `{{ undefined }}`.
  */
-function interpolate(s: string, args: ExecuteArgs): string {
+function interpolate(s: string, args: ExecuteArgs, loopContext?: LoopContext): string {
   return s.replace(/\{\{\s*([\w.[\]]+)\s*\}\}/g, (_, key) => {
     const partsRaw = String(key)
     // Split on dots, then split any `[N]` indices off the segment.
@@ -1120,6 +1170,20 @@ function interpolate(s: string, args: ExecuteArgs): string {
     if (parts[0] === 'message' && parts[1] === 'text') {
       return String(args.context.message_text ?? '')
     }
+    if (parts[0] === 'loop') {
+      // Only meaningful during a `send_images` iteration. Outside
+      // one, fall back to empty so we don't silently leak stale
+      // values from a previous step's loop into another step's text.
+      if (!loopContext) return ''
+      if (parts.length === 2 && parts[1] === 'index') {
+        return String(loopContext.index)
+      }
+      const value = resolvePath(loopContext.item, parts.slice(1))
+      if (value == null) return ''
+      if (typeof value === 'string') return value
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+      return JSON.stringify(value)
+    }
     if (parts[0] === 'vars') {
       const value = resolvePath(args.context.vars, parts.slice(1))
       if (value == null) return ''
@@ -1129,6 +1193,98 @@ function interpolate(s: string, args: ExecuteArgs): string {
     }
     return ''
   })
+}
+
+/**
+ * Per-iteration scope available during `send_images` caption
+ * interpolation. `item` is the current array element; `index` is
+ * 1-based so the user can write `{{ loop.index }}. {{ loop.title }}`.
+ */
+interface LoopContext {
+  item: unknown
+  index: number
+}
+
+/**
+ * Expand a path with a single `[*]` wildcard into the resolved
+ * values for each iteration index, paired with the loop index (1-based).
+ *
+ * Example: `vars.webhook_response.results[*].media[0].url`
+ *   → returns [{ index: 1, item: {...}, value: "url1" }, ...]
+ *
+ * If the path has no `[*]`, the result is a single entry. If the
+ * array at the wildcard position is missing/empty, returns [].
+ *
+ * Note: the leading `vars.` segment is stripped — callers always pass
+ * the vars root directly, so we don't need a `vars.` prefix in the
+ * path here (unlike `interpolate()` which uses `{{ vars.X }}` because
+ * it takes the whole run context).
+ */
+function expandWildcardPath(
+  root: unknown,
+  rawPath: string,
+): Array<{ index: number; item: unknown; value: string }> {
+  let path = rawPath.trim()
+  if (path.startsWith('vars.') || path === 'vars') path = path.slice(5)
+  const wildcardIdx = path.indexOf('[*]')
+  if (wildcardIdx < 0) {
+    // No wildcard — single-shot resolution.
+    const value = resolvePathString(root, path)
+    if (value === undefined) return []
+    return [{ index: 1, item: undefined, value }]
+  }
+
+  // Split into prefix (everything up to AND INCLUDING the segment
+  // that holds `[*]` — that's the array we iterate) and suffix
+  // (everything after `[*]`, resolved per-item).
+  const prefixPath = path.slice(0, wildcardIdx)
+  const suffixPath = path.slice(wildcardIdx + 3) // skip "[*]"
+  const suffixTrimmed = suffixPath.startsWith('.') ? suffixPath.slice(1) : suffixPath
+
+  const arr = resolvePath(root, parseDottedPath(prefixPath))
+  if (!Array.isArray(arr)) return []
+
+  // For each item, resolve the suffix path against the item itself.
+  const suffixParts = parseDottedPath(suffixTrimmed)
+  return arr
+    .map((item, i) => {
+      const value = resolvePath(item, suffixParts)
+      return { index: i + 1, item, value: typeof value === 'string' ? value : '' }
+    })
+    .filter((r) => r.value !== '')
+}
+
+/**
+ * Like `parseDottedPath` inline: split a dotted path into segments,
+ * pulling out `[N]` array indices as numeric parts.
+ */
+function parseDottedPath(raw: string): Array<string | number> {
+  const parts: Array<string | number> = []
+  for (const segment of raw.split('.')) {
+    if (!segment) continue
+    const m = segment.match(/^([\w]+)((?:\[\d+\])+)$/)
+    if (m) {
+      parts.push(m[1])
+      for (const idx of segment.matchAll(/\[(\d+)\]/g)) {
+        parts.push(Number(idx[1]))
+      }
+    } else {
+      parts.push(segment)
+    }
+  }
+  return parts
+}
+
+/**
+ * Resolve a fully dotted path (no `[*]`) against `root` and stringify
+ * the result. Returns `undefined` if any segment is missing.
+ */
+function resolvePathString(root: unknown, rawPath: string): string | undefined {
+  const value = resolvePath(root, parseDottedPath(rawPath))
+  if (value == null) return undefined
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return JSON.stringify(value)
 }
 
 async function appendResults(

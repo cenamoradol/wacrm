@@ -34,6 +34,7 @@ import {
   MousePointerClick,
   List,
   Sparkles,
+  Image,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -114,6 +115,7 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   close_conversation: { label: "close_conversation", icon: CircleSlash, border: "border-l-primary" },
   llm_draft_message: { label: "llm_draft_message", icon: Sparkles, border: "border-l-primary" },
   extract_vars: { label: "extract_vars", icon: Sparkles, border: "border-l-primary" },
+  send_images: { label: "send_images", icon: Image, border: "border-l-primary" },
 }
 
 const ADDABLE_STEPS: AutomationStepType[] = [
@@ -131,6 +133,7 @@ const ADDABLE_STEPS: AutomationStepType[] = [
   "send_webhook",
   "llm_draft_message",
   "extract_vars",
+  "send_images",
   "close_conversation",
 ]
 
@@ -196,6 +199,8 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
       return { prompt: "" }
     case "extract_vars":
       return { prompt: "", fields: {} }
+    case "send_images":
+      return { image_path: "", caption: "", max_images: 5 }
     case "close_conversation":
       return {}
     default:
@@ -1728,6 +1733,58 @@ function StepEditor({
               {t("config.extractVarsHint", {
                 defaultValue:
                   "Each defined field is written to vars.{name} after a successful extraction. Fields the LLM can't extract are simply omitted (vars stays undefined, so query_params drops the param). Requires AI Assistant to be configured.",
+              })}
+            </p>
+          </FieldBlock>
+        </>
+      )
+    }
+    case "send_images": {
+      return (
+        <>
+          <FieldBlock label={t("config.imagePathLabel")}>
+            <Input
+              value={(cfg.image_path as string) ?? ""}
+              onChange={(e) => set({ image_path: e.target.value })}
+              placeholder={t("config.imagePathPlaceholder")}
+              className="bg-muted font-mono text-xs text-foreground"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("config.imagePathHint", {
+                defaultValue:
+                  "Path with [*] wildcards to iterate image URLs. Example: vars.webhook_response.results[*].media[0].url. Each resolved URL becomes one WhatsApp image message.",
+              })}
+            </p>
+          </FieldBlock>
+          <FieldBlock label={t("config.imageCaptionLabel")}>
+            <Textarea
+              value={(cfg.caption as string) ?? ""}
+              onChange={(e) => set({ caption: e.target.value })}
+              placeholder={t("config.imageCaptionPlaceholder")}
+              className="min-h-24 bg-muted text-foreground"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("config.imageCaptionHint", {
+                defaultValue:
+                  "Caption rendered under each image (same bubble). Use {{ loop.index }} for the 1-based iteration position and {{ loop.<field> }} for fields of the current array item. Example: {{ loop.index }}. {{ loop.title }} — ${{ loop.price }}",
+              })}
+            </p>
+          </FieldBlock>
+          <FieldBlock label={t("config.maxImagesLabel")}>
+            <Input
+              type="number"
+              min={1}
+              max={50}
+              value={(cfg.max_images as number) ?? 5}
+              onChange={(e) =>
+                set({ max_images: Math.max(1, Number(e.target.value)) })
+              }
+              className="bg-muted text-foreground"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("config.maxImagesHint", {
+                defaultValue:
+                  "Cap on images sent (default 5). Prevents a runaway webhook from spamming the customer's chat.",
               })}
             </p>
           </FieldBlock>

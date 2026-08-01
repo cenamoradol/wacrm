@@ -472,7 +472,14 @@ export type AutomationStepType =
    *  (e.g. brand/model/year from "¿qué Hyundai Elantras 2010
    *  tenés?" → vars.brand, vars.model, vars.year). Fields the LLM
    *  can't extract are simply omitted — see `extract_vars` step. */
-  | 'extract_vars';
+  | 'extract_vars'
+  /** Sends one WhatsApp image message per URL discovered via a path
+   *  with `[*]` wildcards. Each message carries the image plus an
+   *  optional caption underneath (same bubble). The caption can use
+   *  `{{ loop.index }}` (1-based) and `{{ loop.<field> }}` to
+   *  reference fields of the current array item — the universal way
+   *  to format per-item text from an array webhook response. */
+  | 'send_images';
 
 export type AutomationLogStatus = 'success' | 'partial' | 'failed';
 
@@ -646,6 +653,32 @@ export interface ExtractVarsStepConfig {
 
 export type ExtractVarsFieldType = 'string' | 'number' | 'boolean';
 
+/**
+ * Image-message step. Iterates a path with `[*]` wildcards; for each
+ * resolved URL, sends ONE WhatsApp image message with an optional
+ * caption rendered in the same bubble (text under the image).
+ *
+ * Caption interpolation supports a `loop.*` scope that resolves to
+ * the current array item — so `{{ loop.title }}` reads
+ * `vars.webhook_response.results[i].title` for each i. `{{ loop.index }}`
+ * is 1-based. Anything outside `loop.` falls back to the regular
+ * `vars.*` / `message.*` resolution.
+ *
+ * Empty/whitespace URLs after interpolation are skipped silently.
+ * `max_images` caps the count so a runaway webhook doesn't spam the
+ * customer's chat (default 5).
+ */
+export interface SendImagesStepConfig {
+  /** Path with `[*]` to iterate image URLs.
+   *  Example: "vars.webhook_response.results[*].media[0].url" */
+  image_path: string;
+  /** Caption under each image. Optional. Supports newlines (\n) and
+   *  the `loop.*` interpolation scope (see above). */
+  caption?: string;
+  /** Cap on images sent. Default 5. */
+  max_images?: number;
+}
+
 export type AutomationStepConfig =
   | SendMessageStepConfig
   | SendButtonsStepConfig
@@ -660,6 +693,7 @@ export type AutomationStepConfig =
   | SendWebhookStepConfig
   | LlmDraftStepConfig
   | ExtractVarsStepConfig
+  | SendImagesStepConfig
   | Record<string, never>
   | Record<string, unknown>;
 

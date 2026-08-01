@@ -839,7 +839,8 @@
         "send_webhook": "웹훅 보내기",
         "close_conversation": "대화 닫기",
         "llm_draft_message": "LLM 초안 메시지",
-        "extract_vars": "변수 추출"
+        "extract_vars": "변수 추출",
+        "send_images": "이미지 보내기"
       },
       "triggers": {
         "new_message_received": {
@@ -999,7 +1000,15 @@
         "extractVarsFieldsLabel": "추출할 필드",
         "extractVarsFieldNamePlaceholder": "필드 이름 (예: brand)",
         "addField": "+ 필드 추가",
-        "extractVarsHint": "정의된 각 필드는 성공적인 추출 후 vars.{name}에 기록됩니다. LLM이 추출할 수 없는 필드는 단순히 생략되며(vars는 정의되지 않은 상태로 유지됨, query_params가 해당 파라미터를 제외함) AI 어시스턴트 설정이 필요합니다."
+        "extractVarsHint": "정의된 각 필드는 성공적인 추출 후 vars.{name}에 기록됩니다. LLM이 추출할 수 없는 필드는 단순히 생략되며(vars는 정의되지 않은 상태로 유지됨, query_params가 해당 파라미터를 제외함) AI 어시스턴트 설정이 필요합니다.",
+        "imagePathLabel": "이미지 경로",
+        "imagePathPlaceholder": "vars.webhook_response.results[*].media[0].url",
+        "imagePathHint": "[*] 와일드카드로 이미지 URL을 반복합니다. 예: vars.webhook_response.results[*].media[0].url. 각 URL은 하나의 WhatsApp 이미지 메시지가 됩니다.",
+        "imageCaptionLabel": "캡션 (선택)",
+        "imageCaptionPlaceholder": "{{ loop.index }}. {{ loop.title }}\n${{ loop.price }}\n\nResponde {{ loop.index }} para seleccionar",
+        "imageCaptionHint": "각 이미지 아래에 렌더링되는 캡션 (같은 버블). {{ loop.index }}는 1-based 반복 위치, {{ loop.<field> }}는 현재 배열 항목의 필드입니다.",
+        "maxImagesLabel": "최대 이미지 수",
+        "maxImagesHint": "전송할 이미지 수 상한 (기본 5). webhook 응답 폭주를 방지합니다."
       }
     }
   },

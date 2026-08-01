@@ -839,7 +839,8 @@
         "send_webhook": "Send Webhook",
         "close_conversation": "Close Conversation",
         "llm_draft_message": "LLM Draft Message",
-        "extract_vars": "Extract Vars"
+        "extract_vars": "Extract Vars",
+        "send_images": "Send Images"
       },
       "triggers": {
         "new_message_received": {
@@ -999,7 +1000,15 @@
         "extractVarsFieldsLabel": "Fields to extract",
         "extractVarsFieldNamePlaceholder": "field name (e.g. brand)",
         "addField": "+ Add field",
-        "extractVarsHint": "Each defined field is written to vars.{name} after a successful extraction. Fields the LLM can't extract are simply omitted (vars stays undefined, so query_params drops the param). Requires AI Assistant to be configured."
+        "extractVarsHint": "Each defined field is written to vars.{name} after a successful extraction. Fields the LLM can't extract are simply omitted (vars stays undefined, so query_params drops the param). Requires AI Assistant to be configured.",
+        "imagePathLabel": "Image path",
+        "imagePathPlaceholder": "vars.webhook_response.results[*].media[0].url",
+        "imagePathHint": "Path with [*] wildcards to iterate image URLs. Example: vars.webhook_response.results[*].media[0].url. Each resolved URL becomes one WhatsApp image message.",
+        "imageCaptionLabel": "Caption (optional)",
+        "imageCaptionPlaceholder": "{{ loop.index }}. {{ loop.title }}\n${{ loop.price }}\n\nResponde {{ loop.index }} para seleccionar",
+        "imageCaptionHint": "Caption rendered under each image (same bubble). Use {{ loop.index }} for the 1-based iteration position and {{ loop.<field> }} for fields of the current array item.",
+        "maxImagesLabel": "Max images",
+        "maxImagesHint": "Cap on images sent (default 5). Prevents a runaway webhook from spamming the customer's chat."
       }
     }
   },

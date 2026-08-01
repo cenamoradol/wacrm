@@ -102,6 +102,7 @@ vi.mock("./meta-send", () => ({
   engineSendText: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
   engineSendTemplate: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
   engineSendInteractive: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
+  engineSendImage: vi.fn(async () => ({ whatsapp_message_id: "img1" })),
 }));
 
 // Mock the LLM helpers so we don't make real provider calls in tests.
@@ -1097,5 +1098,171 @@ describe("extract_vars step", () => {
     // No failure — the engine strips fences and parses.
     const finalUpdate = h.state.logUpdates.at(-1) as { status?: string } | undefined
     expect(finalUpdate?.status).toBe("success")
+  })
+})
+
+// ============================================================
+// send_images step: iterate a `[*]` path and send one WhatsApp
+// image message per resolved URL, with optional caption evaluated
+// in the `loop.*` interpolation scope.
+// ============================================================
+import { engineSendImage } from "./meta-send"
+describe("send_images step", () => {
+  beforeEach(() => {
+    vi.mocked(engineSendImage).mockResolvedValue({ whatsapp_message_id: "img1" })
+  })
+
+  function setupSendImages(
+    cfg: { image_path: string; caption?: string; max_images?: number },
+    initialVars: Record<string, unknown> = {},
+  ) {
+    h.state.owned = { id: "c1" }
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "send images",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }]
+    h.state.steps = [{
+      id: "s1",
+      automation_id: "a1",
+      step_type: "send_images",
+      position: 0,
+      parent_step_id: null,
+      step_config: cfg,
+    }]
+    return runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: {
+        message_text: "tienes hyundai elantra?",
+        conversation_id: "conv-1",
+        vars: initialVars,
+      },
+    })
+  }
+
+  it("sends one image per URL with caption using the loop scope", async () => {
+    const sendImageSpy = vi.mocked(engineSendImage)
+    sendImageSpy.mockReset()
+    sendImageSpy
+      .mockResolvedValueOnce({ whatsapp_message_id: "m1" })
+      .mockResolvedValueOnce({ whatsapp_message_id: "m2" })
+      .mockResolvedValueOnce({ whatsapp_message_id: "m3" })
+
+    await setupSendImages(
+      {
+        image_path: "vars.webhook_response.results[*].media[0].url",
+        caption: "{{ loop.index }}. {{ loop.title }}\n${{ loop.price }}",
+      },
+      {
+        webhook_response: {
+          results: [
+            { title: "Hyundai Elantra 2010", price: "139000", media: [{ url: "https://a.test/1.jpg" }] },
+            { title: "Hyundai Elantra 2010", price: "139000", media: [{ url: "https://a.test/2.jpg" }] },
+            { title: "Hyundai Elantra 2010", price: "139000", media: [{ url: "https://a.test/3.jpg" }] },
+          ],
+        },
+      },
+    )
+
+    expect(sendImageSpy).toHaveBeenCalledTimes(3)
+    expect(sendImageSpy.mock.calls[0][0]).toMatchObject({
+      imageUrl: "https://a.test/1.jpg",
+      caption: "1. Hyundai Elantra 2010\n$139000",
+    })
+    expect(sendImageSpy.mock.calls[1][0]).toMatchObject({
+      imageUrl: "https://a.test/2.jpg",
+      caption: "2. Hyundai Elantra 2010\n$139000",
+    })
+    expect(sendImageSpy.mock.calls[2][0]).toMatchObject({
+      imageUrl: "https://a.test/3.jpg",
+      caption: "3. Hyundai Elantra 2010\n$139000",
+    })
+    const finalUpdate = h.state.logUpdates.at(-1) as { status?: string; steps_executed?: Array<{ detail?: string }> } | undefined
+    expect(finalUpdate?.status).toBe("success")
+    expect(finalUpdate?.steps_executed?.[0]?.detail).toMatch(/sent 3 images/)
+  })
+
+  it("skips items whose URL interpolates to empty", async () => {
+    await setupSendImages(
+      { image_path: "vars.webhook_response.results[*].media[0].url" },
+      {
+        webhook_response: {
+          results: [
+            { media: [{ url: "https://a.test/1.jpg" }] },
+            { media: [] }, // no url � should be skipped
+            { media: [{ url: "https://a.test/3.jpg" }] },
+          ],
+        },
+      },
+    )
+
+    expect(vi.mocked(engineSendImage)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(engineSendImage).mock.calls[0][0].imageUrl).toBe("https://a.test/1.jpg")
+    expect(vi.mocked(engineSendImage).mock.calls[1][0].imageUrl).toBe("https://a.test/3.jpg")
+  })
+
+  it("respects max_images cap", async () => {
+    const sendImageSpy = vi.mocked(engineSendImage)
+    sendImageSpy.mockReset()
+    for (let i = 0; i < 10; i++) {
+      sendImageSpy.mockResolvedValueOnce({ whatsapp_message_id: `m${i}` })
+    }
+
+    await setupSendImages(
+      { image_path: "vars.list[*].url", max_images: 3 },
+      { list: [{ url: "1" }, { url: "2" }, { url: "3" }, { url: "4" }, { url: "5" }] },
+    )
+
+    expect(sendImageSpy).toHaveBeenCalledTimes(3)
+  })
+
+  it("succeeds when no URLs resolve", async () => {
+    await setupSendImages(
+      { image_path: "vars.webhook_response.results[*].media[0].url" },
+      { webhook_response: { results: [] } },
+    )
+
+    expect(vi.mocked(engineSendImage)).not.toHaveBeenCalled()
+    const finalUpdate = h.state.logUpdates.at(-1) as { steps_executed?: Array<{ detail?: string }> } | undefined
+    expect(finalUpdate?.steps_executed?.[0]?.detail).toMatch(/0 URLs/)
+  })
+
+  it("fails when image_path is missing", async () => {
+    h.state.owned = { id: "c1" }
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "no path",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }]
+    h.state.steps = [{
+      id: "s1",
+      automation_id: "a1",
+      step_type: "send_images",
+      position: 0,
+      parent_step_id: null,
+      step_config: { image_path: "" },
+    }]
+
+    await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: { conversation_id: "conv-1" },
+    })
+
+    expect(h.state.logUpdates).toContainEqual(expect.objectContaining({
+      status: "failed",
+      error_message: expect.stringContaining("image_path"),
+    }))
   })
 })
