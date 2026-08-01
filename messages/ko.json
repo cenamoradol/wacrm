@@ -838,7 +838,8 @@
         "condition": "조건 (If/Else)",
         "send_webhook": "웹훅 보내기",
         "close_conversation": "대화 닫기",
-        "llm_draft_message": "LLM 초안 메시지"
+        "llm_draft_message": "LLM 초안 메시지",
+        "extract_vars": "변수 추출"
       },
       "triggers": {
         "new_message_received": {
@@ -986,7 +987,19 @@
         "webhookResponseHint": "웹훅 응답(파싱된 JSON 또는 원시 텍스트)은 vars.webhook_response에 저장되고 상태 코드는 vars.webhook_status에 저장됩니다. 템플릿 플레이스홀더나 후속 LLM 드래프트 스텝에서 참조할 수 있습니다.",
         "llmDraftPromptLabel": "LLM 프롬프트",
         "llmDraftPromptPlaceholder": "고객이 재고를 문의했습니다. vars.webhook_response.results를 사용해 사용 가능한 항목을 나열하세요.",
-        "llmDraftPromptHint": "LLM은 이 프롬프트 + 최근 대화 + 누적된 모든 vars(이전 send_webhook 스텝의 vars.webhook_response 포함)를 받습니다. AI 어시스턴트 설정이 필요합니다."
+        "llmDraftPromptHint": "LLM은 이 프롬프트 + 최근 대화 + 누적된 모든 vars(이전 send_webhook 스텝의 vars.webhook_response 포함)를 받습니다. AI 어시스턴트 설정이 필요합니다.",
+        "methodLabel": "메서드",
+        "queryParamsLabel": "쿼리 파라미터",
+        "queryParamKeyPlaceholder": "key",
+        "queryParamValuePlaceholder": "value ({{ vars.foo }} 지원)",
+        "queryParamsHint": "각 값은 {{ vars.foo }} 플레이스홀더를 지원합니다. 보간된 값이 비어 있는 파라미터는 URL에서 완전히 제외됩니다(?key=가 전송되지 않음).",
+        "addQueryParam": "+ 파라미터 추가",
+        "extractVarsPromptLabel": "추출 프롬프트",
+        "extractVarsPromptPlaceholder": "고객 메시지에서 브랜드, 모델, 연식을 추출하세요.",
+        "extractVarsFieldsLabel": "추출할 필드",
+        "extractVarsFieldNamePlaceholder": "필드 이름 (예: brand)",
+        "addField": "+ 필드 추가",
+        "extractVarsHint": "정의된 각 필드는 성공적인 추출 후 vars.{name}에 기록됩니다. LLM이 추출할 수 없는 필드는 단순히 생략되며(vars는 정의되지 않은 상태로 유지됨, query_params가 해당 파라미터를 제외함) AI 어시스턴트 설정이 필요합니다."
       }
     }
   },

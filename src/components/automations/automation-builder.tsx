@@ -113,6 +113,7 @@ const STEP_META: Record<AutomationStepType, StepMeta> = {
   send_webhook: { label: "send_webhook", icon: Webhook, border: "border-l-primary" },
   close_conversation: { label: "close_conversation", icon: CircleSlash, border: "border-l-primary" },
   llm_draft_message: { label: "llm_draft_message", icon: Sparkles, border: "border-l-primary" },
+  extract_vars: { label: "extract_vars", icon: Sparkles, border: "border-l-primary" },
 }
 
 const ADDABLE_STEPS: AutomationStepType[] = [
@@ -129,6 +130,7 @@ const ADDABLE_STEPS: AutomationStepType[] = [
   "condition",
   "send_webhook",
   "llm_draft_message",
+  "extract_vars",
   "close_conversation",
 ]
 
@@ -189,9 +191,11 @@ function blankConfig(type: AutomationStepType): Record<string, unknown> {
     case "condition":
       return { subject: "tag_presence", operand: "", value: "" }
     case "send_webhook":
-      return { url: "", headers: {}, body_template: "" }
+      return { url: "", headers: {}, body_template: "", method: "POST", query_params: {} }
     case "llm_draft_message":
       return { prompt: "" }
+    case "extract_vars":
+      return { prompt: "", fields: {} }
     case "close_conversation":
       return {}
     default:
@@ -1485,7 +1489,19 @@ function StepEditor({
           )}
         </>
       )
-    case "send_webhook":
+    case "send_webhook": {
+      // Determine the implicit method so the toggle reflects the user's
+      // current intent without forcing them to flip it on every save.
+      const method: 'GET' | 'POST' =
+        (cfg.method as 'GET' | 'POST') ??
+        ((cfg.query_params as Record<string, unknown> | undefined) &&
+        Object.keys(cfg.query_params as Record<string, unknown>).length > 0
+          ? 'GET'
+          : 'POST')
+      const useGet = method === 'GET'
+      const queryParams =
+        (cfg.query_params as Record<string, string> | undefined) ?? {}
+      const queryParamEntries = Object.entries(queryParams)
       return (
         <>
           <FieldBlock label={t("config.urlLabel")}>
@@ -1495,21 +1511,121 @@ function StepEditor({
               className="bg-muted text-foreground"
             />
           </FieldBlock>
-          <FieldBlock label={t("config.bodyTemplateLabel")}>
-            <Textarea
-              value={(cfg.body_template as string) ?? ""}
-              onChange={(e) => set({ body_template: e.target.value })}
-              className="min-h-20 bg-muted font-mono text-xs text-foreground"
-            />
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              {t("config.webhookResponseHint", {
-                defaultValue:
-                  "The webhook response (parsed JSON or raw text) is stored in vars.webhook_response and the status in vars.webhook_status. Reference them in template placeholders or in a downstream LLM draft step.",
-              })}
-            </p>
+          <FieldBlock label={t("config.methodLabel")}>
+            <select
+              value={method}
+              onChange={(e) => set({ method: e.target.value as 'GET' | 'POST' })}
+              className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
+            >
+              <option value="POST">POST (JSON body)</option>
+              <option value="GET">GET (query params)</option>
+            </select>
           </FieldBlock>
+          {useGet ? (
+            <FieldBlock label={t("config.queryParamsLabel")}>
+              <div className="space-y-2">
+                {queryParamEntries.map(([k, v], i) => (
+                  <div
+                    key={`${i}-${k}`}
+                    className="flex items-center gap-2"
+                  >
+                    <Input
+                      value={k}
+                      onChange={(e) => {
+                        const next: Record<string, string> = {}
+                        for (const [ek, ev] of queryParamEntries) {
+                          if (ek === k) next[e.target.value] = ev
+                          else next[ek] = ev
+                        }
+                        set({ query_params: next })
+                      }}
+                      placeholder={t("config.queryParamKeyPlaceholder")}
+                      className="flex-1 bg-muted font-mono text-xs text-foreground"
+                    />
+                    <span className="text-muted-foreground">=</span>
+                    <Input
+                      value={v}
+                      onChange={(e) =>
+                        set({
+                          query_params: { ...queryParams, [k]: e.target.value },
+                        })
+                      }
+                      placeholder={t("config.queryParamValuePlaceholder")}
+                      className="flex-1 bg-muted font-mono text-xs text-foreground"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        const next = { ...queryParams }
+                        delete next[k]
+                        set({ query_params: next })
+                      }}
+                      aria-label={t("delete", { defaultValue: "Delete" })}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const next = { ...queryParams }
+                    // Find a unique key placeholder.
+                    let i = 1
+                    while (`param_${i}` in next) i++
+                    next[`param_${i}`] = ""
+                    set({ query_params: next })
+                  }}
+                >
+                  {t("config.addQueryParam", { defaultValue: "+ Add param" })}
+                </Button>
+              </div>
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {t("config.queryParamsHint", {
+                  defaultValue:
+                    "Each value supports {{ vars.foo }} placeholders. Params whose value interpolates to empty are dropped from the URL entirely (no ?key= sent).",
+                })}
+              </p>
+            </FieldBlock>
+          ) : (
+            <FieldBlock label={t("config.bodyTemplateLabel")}>
+              <Textarea
+                value={(cfg.body_template as string) ?? ""}
+                onChange={(e) => set({ body_template: e.target.value })}
+                className="min-h-20 bg-muted font-mono text-xs text-foreground"
+              />
+            </FieldBlock>
+          )}
+          <FieldBlock label={t("config.headersLabel")}>
+            <Textarea
+              value={JSON.stringify(cfg.headers ?? {}, null, 2)}
+              onChange={(e) => {
+                try {
+                  set({ headers: JSON.parse(e.target.value) })
+                } catch {
+                  // Invalid JSON mid-edit: store raw string for now so the
+                  // user can keep typing. The runner will skip / fail if
+                  // it's still invalid at execution time.
+                  set({ headers: e.target.value as unknown as Record<string, string> })
+                }
+              }}
+              placeholder={t("config.placeholderHeaders")}
+              className="min-h-16 bg-muted font-mono text-xs text-foreground"
+            />
+          </FieldBlock>
+          <p className="text-[11px] text-muted-foreground">
+            {t("config.webhookResponseHint", {
+              defaultValue:
+                "The webhook response (parsed JSON or raw text) is stored in vars.webhook_response and the status in vars.webhook_status. Reference them in template placeholders or in a downstream LLM draft step.",
+            })}
+          </p>
         </>
       )
+    }
     case "llm_draft_message":
       return (
         <>
@@ -1529,6 +1645,95 @@ function StepEditor({
           </FieldBlock>
         </>
       )
+    case "extract_vars": {
+      // Field key → primitive type map. Edits replace the whole map
+      // (small, predictable for v1 — most flows have 2-4 fields).
+      const fields =
+        (cfg.fields as Record<string, 'string' | 'number' | 'boolean'> | undefined) ?? {}
+      const fieldEntries = Object.entries(fields)
+      return (
+        <>
+          <FieldBlock label={t("config.extractVarsPromptLabel")}>
+            <Textarea
+              value={(cfg.prompt as string) ?? ""}
+              onChange={(e) => set({ prompt: e.target.value })}
+              placeholder={t("config.extractVarsPromptPlaceholder")}
+              className="min-h-20 bg-muted text-foreground"
+            />
+          </FieldBlock>
+          <FieldBlock label={t("config.extractVarsFieldsLabel")}>
+            <div className="space-y-2">
+              {fieldEntries.map(([name, type]) => (
+                <div key={name} className="flex items-center gap-2">
+                  <Input
+                    value={name}
+                    onChange={(e) => {
+                      const next: Record<string, 'string' | 'number' | 'boolean'> = {}
+                      for (const [en, et] of fieldEntries) {
+                        if (en === name) next[e.target.value] = et
+                        else next[en] = et
+                      }
+                      set({ fields: next })
+                    }}
+                    placeholder={t("config.extractVarsFieldNamePlaceholder")}
+                    className="flex-1 bg-muted font-mono text-xs text-foreground"
+                  />
+                  <select
+                    value={type}
+                    onChange={(e) =>
+                      set({
+                        fields: {
+                          ...fields,
+                          [name]: e.target.value as 'string' | 'number' | 'boolean',
+                        },
+                      })
+                    }
+                    className="w-32 rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
+                  >
+                    <option value="string">string</option>
+                    <option value="number">number</option>
+                    <option value="boolean">boolean</option>
+                  </select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => {
+                      const next = { ...fields }
+                      delete next[name]
+                      set({ fields: next })
+                    }}
+                    aria-label={t("delete", { defaultValue: "Delete" })}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const next = { ...fields }
+                  let i = 1
+                  while (`field_${i}` in next) i++
+                  next[`field_${i}`] = "string"
+                  set({ fields: next })
+                }}
+              >
+                {t("config.addField", { defaultValue: "+ Add field" })}
+              </Button>
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("config.extractVarsHint", {
+                defaultValue:
+                  "Each defined field is written to vars.{name} after a successful extraction. Fields the LLM can't extract are simply omitted (vars stays undefined, so query_params drops the param). Requires AI Assistant to be configured.",
+              })}
+            </p>
+          </FieldBlock>
+        </>
+      )
+    }
     case "close_conversation":
       return (
         <p className="text-xs text-muted-foreground">

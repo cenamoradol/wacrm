@@ -151,6 +151,43 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
         })
       }
       break
+    case 'extract_vars':
+      if (!nonEmpty(c.prompt)) {
+        issues.push({
+          path: `${path}.prompt`,
+          message: 'extract_vars requires a non-empty prompt',
+        })
+      }
+      const fields = c.fields
+      if (
+        !fields ||
+        typeof fields !== 'object' ||
+        Array.isArray(fields) ||
+        Object.keys(fields as Record<string, unknown>).length === 0
+      ) {
+        issues.push({
+          path: `${path}.fields`,
+          message: 'extract_vars requires at least one field',
+        })
+      } else {
+        const allowed = new Set(['string', 'number', 'boolean'])
+        for (const [k, v] of Object.entries(fields as Record<string, unknown>)) {
+          if (!nonEmpty(k)) {
+            issues.push({
+              path: `${path}.fields`,
+              message: 'field name cannot be empty',
+            })
+            break
+          }
+          if (typeof v !== 'string' || !allowed.has(v)) {
+            issues.push({
+              path: `${path}.fields.${k}`,
+              message: `field "${k}" type must be one of: string, number, boolean`,
+            })
+          }
+        }
+      }
+      break
     case 'close_conversation':
       // No config required.
       break

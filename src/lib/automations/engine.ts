@@ -9,6 +9,8 @@ import type {
   TagTriggerConfig,
   LlmConditionTriggerConfig,
   LlmDraftStepConfig,
+  ExtractVarsStepConfig,
+  ExtractVarsFieldType,
   SendMessageStepConfig,
   SendButtonsStepConfig,
   SendListStepConfig,
@@ -604,17 +606,49 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       if (!(await isDeliverableUrl(cfg.url))) {
         throw new Error('send_webhook: destination not allowed')
       }
-      const body = cfg.body_template ? interpolate(cfg.body_template, args) : JSON.stringify(args.context)
-      const res = await fetch(cfg.url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
-        body,
+
+      // Resolve the method + URL. POST is the legacy default; GET is
+      // implied when query_params is present so the typical setup
+      // ("configure params, no method choice") just works.
+      const method = cfg.method ?? (cfg.query_params ? 'GET' : 'POST')
+
+      let finalUrl = cfg.url
+      let body: string | undefined
+      if (method === 'GET') {
+        // Drop any param whose interpolated value is empty or
+        // whitespace. The point of query_params is "the customer
+        // might mention only some of these" — sending `?year=` to a
+        // strict API usually fails; sending no `year` parameter at all
+        // is the documented "leave it open" signal.
+        const pairs: string[] = []
+        for (const [key, raw] of Object.entries(cfg.query_params ?? {})) {
+          const value = interpolate(String(raw), args).trim()
+          if (!value) continue
+          pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+        }
+        if (pairs.length > 0) {
+          finalUrl = `${cfg.url}?${pairs.join('&')}`
+        }
+      } else {
+        body = cfg.body_template
+          ? interpolate(cfg.body_template, args)
+          : JSON.stringify(args.context)
+      }
+
+      const res = await fetch(finalUrl, {
+        method,
+        headers: {
+          ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
+          ...(cfg.headers ?? {}),
+        },
+        ...(body !== undefined ? { body } : {}),
         // Do NOT follow redirects — a public URL could 3xx-bounce to an
         // internal address, defeating the guard above. Bound the request
         // so a hung/slow internal host can't tie up the runner.
         redirect: 'manual',
         signal: AbortSignal.timeout(10_000),
       })
+
       // Always read the response body (even on non-2xx) so downstream
       // steps can branch on it. Parse as JSON when possible; otherwise
       // keep the raw text. Surface both the parsed body and the status
@@ -637,7 +671,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         webhook_status: res.status,
       }
       if (!res.ok) throw new Error(`webhook returned ${res.status}`)
-      return `webhook ${res.status} (${responseText.length} bytes captured)`
+      return `webhook ${method} ${res.status} (${responseText.length} bytes captured)`
     }
 
     case 'close_conversation': {
@@ -713,9 +747,168 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       return `LLM draft → sent (${whatsapp_message_id})`
     }
 
+    case 'extract_vars': {
+      // LLM extracts structured fields from the recent message + writes
+      // them to vars.{key}. The LLM is told to OMIT any field it can't
+      // confidently extract — those vars stay undefined, so downstream
+      // query_params interpolation drops the param entirely.
+      const cfg = step.step_config as ExtractVarsStepConfig
+      if (!cfg.prompt || !cfg.prompt.trim()) {
+        throw new Error('extract_vars needs a non-empty prompt')
+      }
+      const fieldDefs = cfg.fields ?? {}
+      const fieldNames = Object.keys(fieldDefs)
+      if (fieldNames.length === 0) {
+        throw new Error('extract_vars needs at least one field defined')
+      }
+
+      const db = supabaseAdmin()
+      const aiConfig = await loadAiConfig(db, args.automation.account_id)
+      if (!aiConfig) {
+        throw new Error(
+          'extract_vars requires the AI Assistant to be configured. Set one up in Settings → AI Assistant.',
+        )
+      }
+
+      const fieldsSpec = fieldNames
+        .map((k) => `  - "${k}": ${fieldDefs[k]}`)
+        .join('\n')
+
+      const systemPrompt =
+        'You are a structured data extractor for a WhatsApp CRM automation. ' +
+        'Read the customer message(s) below and return ONLY a JSON object whose keys ' +
+        'exactly match the requested fields, with the requested primitive types. ' +
+        'If the customer did not mention a particular field, OMIT it from the ' +
+        'response (do not set it to null, do not set it to an empty string). ' +
+        'Output ONLY the JSON object — no markdown fences, no commentary, no preamble. ' +
+        'Numbers must be JSON numbers (no quotes), booleans must be true/false, ' +
+        'strings must be plain text without surrounding quotes in the JSON output.'
+
+      const userContent =
+        `REQUESTED FIELDS:\n${fieldsSpec}\n\n` +
+        `INSTRUCTION:\n${cfg.prompt.trim()}\n\n` +
+        `LATEST CUSTOMER MESSAGE:\n${(args.context.message_text ?? '').toString().trim()}\n\n` +
+        'Return the JSON object now.'
+
+      const { text } = await generateReply({
+        config: aiConfig,
+        systemPrompt,
+        messages: [{ role: 'user', content: userContent }],
+      })
+
+      // Parse the LLM's reply. Tolerate a few common wrappers (the model
+      // sometimes wraps in ```json fences or adds trailing prose).
+      const jsonText = extractFirstJsonObject(text)
+      let extracted: Record<string, unknown>
+      try {
+        extracted = JSON.parse(jsonText) as Record<string, unknown>
+      } catch {
+        throw new Error(
+          `extract_vars: LLM returned non-JSON output (first 80 chars): ${text.slice(0, 80)}`,
+        )
+      }
+      if (extracted === null || typeof extracted !== 'object' || Array.isArray(extracted)) {
+        throw new Error('extract_vars: LLM did not return a JSON object')
+      }
+
+      // Coerce each returned field to its declared type and merge into
+      // vars. Unknown fields (the LLM inventing keys we didn't ask for)
+      // are dropped.
+      const merged: Record<string, unknown> = { ...(args.context.vars ?? {}) }
+      const writtenKeys: string[] = []
+      for (const key of fieldNames) {
+        if (!(key in extracted)) continue
+        const raw = extracted[key]
+        const coerced = coerceExtractField(raw, fieldDefs[key], key)
+        if (coerced === undefined) continue
+        merged[key] = coerced
+        writtenKeys.push(key)
+      }
+      args.context.vars = merged
+
+      if (writtenKeys.length === 0) {
+        return `extract_vars: no fields extracted from message`
+      }
+      return `extract_vars: wrote ${writtenKeys.join(', ')}`
+    }
+
     default:
       return `unknown step: ${step.step_type}`
   }
+}
+
+/**
+ * Pull the first {...} block out of a model response. Most LLMs return
+ * pure JSON when told to, but some wrap in ```json fences or add a
+ * one-line preamble. We grab the substring between the first `{` and
+ * its matching `}` (using a simple depth counter — no regex backrefs).
+ */
+function extractFirstJsonObject(text: string): string {
+  const trimmed = text.trim()
+  // Strip ```json fences if present.
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/)
+  if (fenced) return fenced[1].trim()
+
+  const first = trimmed.indexOf('{')
+  if (first < 0) return trimmed
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = first; i < trimmed.length; i++) {
+    const c = trimmed[i]
+    if (inString) {
+      if (escape) escape = false
+      else if (c === '\\') escape = true
+      else if (c === '"') inString = false
+      continue
+    }
+    if (c === '"') inString = true
+    else if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) return trimmed.slice(first, i + 1)
+    }
+  }
+  return trimmed.slice(first)
+}
+
+/**
+ * Coerce a single field returned by the LLM to its declared type.
+ * Returns `undefined` when the value is null/undefined/empty-string
+ * for non-string types — those are signals that the LLM didn't have
+ * the field, and downstream code (query_params interpolation) treats
+ * them as "drop the param" anyway.
+ */
+function coerceExtractField(
+  raw: unknown,
+  type: ExtractVarsFieldType,
+  key: string,
+): string | number | boolean | undefined {
+  if (raw === null || raw === undefined) return undefined
+  switch (type) {
+    case 'string':
+      if (typeof raw === 'string') return raw.trim() || undefined
+      return String(raw).trim() || undefined
+    case 'number': {
+      if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+      if (typeof raw === 'string') {
+        const n = Number(raw.trim())
+        return Number.isFinite(n) ? n : undefined
+      }
+      return undefined
+    }
+    case 'boolean':
+      if (typeof raw === 'boolean') return raw
+      if (typeof raw === 'string') {
+        const s = raw.trim().toLowerCase()
+        if (s === 'true' || s === 'yes' || s === '1') return true
+        if (s === 'false' || s === 'no' || s === '0') return false
+      }
+      return undefined
+  }
+  // Unreachable — keeps the linter happy about the exhaustive switch.
+  void key
+  return undefined
 }
 
 // ------------------------------------------------------------

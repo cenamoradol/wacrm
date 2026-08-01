@@ -838,7 +838,8 @@
         "condition": "Condition (If/Else)",
         "send_webhook": "Send Webhook",
         "close_conversation": "Close Conversation",
-        "llm_draft_message": "LLM Draft Message"
+        "llm_draft_message": "LLM Draft Message",
+        "extract_vars": "Extract Vars"
       },
       "triggers": {
         "new_message_received": {
@@ -986,7 +987,19 @@
         "webhookResponseHint": "The webhook response (parsed JSON or raw text) is stored in vars.webhook_response and the status in vars.webhook_status. Reference them in template placeholders or in a downstream LLM draft step.",
         "llmDraftPromptLabel": "LLM prompt",
         "llmDraftPromptPlaceholder": "The customer asked about inventory. Use vars.webhook_response.results to list what's available.",
-        "llmDraftPromptHint": "The LLM receives this prompt + the recent conversation + all accumulated vars (including vars.webhook_response from any send_webhook step above). Requires AI Assistant to be configured."
+        "llmDraftPromptHint": "The LLM receives this prompt + the recent conversation + all accumulated vars (including vars.webhook_response from any send_webhook step above). Requires AI Assistant to be configured.",
+        "methodLabel": "Method",
+        "queryParamsLabel": "Query parameters",
+        "queryParamKeyPlaceholder": "key",
+        "queryParamValuePlaceholder": "value (supports {{ vars.foo }})",
+        "queryParamsHint": "Each value supports {{ vars.foo }} placeholders. Params whose value interpolates to empty are dropped from the URL entirely (no ?key= sent).",
+        "addQueryParam": "+ Add param",
+        "extractVarsPromptLabel": "Extraction prompt",
+        "extractVarsPromptPlaceholder": "Extract brand, model and year from the customer's message.",
+        "extractVarsFieldsLabel": "Fields to extract",
+        "extractVarsFieldNamePlaceholder": "field name (e.g. brand)",
+        "addField": "+ Add field",
+        "extractVarsHint": "Each defined field is written to vars.{name} after a successful extraction. Fields the LLM can't extract are simply omitted (vars stays undefined, so query_params drops the param). Requires AI Assistant to be configured."
       }
     }
   },

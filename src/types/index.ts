@@ -464,7 +464,15 @@ export type AutomationStepType =
    *  accumulated vars (including `vars.webhook_response` from a prior
    *  send_webhook step) + recent conversation. Use after a webhook
    *  fetch to turn structured data into a natural reply. */
-  | 'llm_draft_message';
+  | 'llm_draft_message'
+  /** LLM extracts structured fields from the recent message /
+   *  conversation and writes them into `vars.{key}`. Universal
+   *  pre-step for any automation that needs to turn free-form
+   *  customer text into typed parameters before hitting an API
+   *  (e.g. brand/model/year from "¿qué Hyundai Elantras 2010
+   *  tenés?" → vars.brand, vars.model, vars.year). Fields the LLM
+   *  can't extract are simply omitted — see `extract_vars` step. */
+  | 'extract_vars';
 
 export type AutomationLogStatus = 'success' | 'partial' | 'failed';
 
@@ -584,8 +592,18 @@ export interface ConditionStepConfig {
 
 export interface SendWebhookStepConfig {
   url: string;
+  /** 'POST' (default, sends body_template as JSON) or 'GET' (no body,
+   *  query params appended to the URL). GET is auto-selected when
+   *  `query_params` is set and `method` is omitted. */
+  method?: 'GET' | 'POST';
   headers?: Record<string, string>;
+  /** JSON body for POST requests. Ignored when method === 'GET'. */
   body_template?: string;
+  /** Query parameters for GET requests. Each value is interpolated
+   *  against the run context (so `{{ vars.brand }}` resolves). Empty
+   *  / whitespace values are omitted — the param is dropped entirely
+   *  instead of becoming `?key=` in the URL. */
+  query_params?: Record<string, string>;
 }
 
 /**
@@ -603,6 +621,31 @@ export interface LlmDraftStepConfig {
   prompt: string;
 }
 
+/**
+ * LLM-driven field extractor. The LLM reads the customer's recent
+ * message and the configured `prompt`, then returns a JSON object
+ * whose keys match `fields`. Each value is coerced to the declared
+ * primitive type (string | number | boolean) before being merged
+ * into `vars.{key}`. Fields the LLM can't confidently extract are
+ * simply omitted (vars stays undefined for that key) — empty strings
+ * are NOT written, so downstream `query_params` interpolation drops
+ * the param entirely instead of sending `?key=`.
+ *
+ * Universal: any automation that needs to turn free-form customer
+ * text into typed parameters can use this as the first step (before
+ * a GET send_webhook or a downstream template/LLM compose).
+ */
+export interface ExtractVarsStepConfig {
+  /** Natural-language instruction telling the LLM what to extract. */
+  prompt: string;
+  /** Map of `key → primitive type`. The LLM is asked to return a
+   *  JSON object with exactly these keys and types. Unknown keys
+   *  are dropped; missing keys are left as undefined vars. */
+  fields: Record<string, ExtractVarsFieldType>;
+}
+
+export type ExtractVarsFieldType = 'string' | 'number' | 'boolean';
+
 export type AutomationStepConfig =
   | SendMessageStepConfig
   | SendButtonsStepConfig
@@ -616,6 +659,7 @@ export type AutomationStepConfig =
   | ConditionStepConfig
   | SendWebhookStepConfig
   | LlmDraftStepConfig
+  | ExtractVarsStepConfig
   | Record<string, never>
   | Record<string, unknown>;
 
