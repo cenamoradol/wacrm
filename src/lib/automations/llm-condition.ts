@@ -80,6 +80,9 @@ export async function evaluateLlmCondition(
   const firstLine = text.trim().split('\n')[0] ?? ''
   const verdict = firstLine.trim().toUpperCase()
   const boolean = verdict.startsWith('YES')
+  console.log(
+    `[automations] llm_condition verdict=${boolean ? 'YES' : 'NO'} raw="${text.replace(/\n/g, ' ').slice(0, 120)}" prompt="${args.prompt.slice(0, 80)}" msg="${args.recentMessage.slice(0, 80)}"`,
+  )
 
   // The reasoning lives on every line after the first; trim it.
   const rest = text.split('\n').slice(1).join(' ').trim()

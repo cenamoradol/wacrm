@@ -111,14 +111,18 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
       console.error('[automations] fetch failed:', error)
       return
     }
-    if (!automations || automations.length === 0) return
+    const count = automations?.length ?? 0
+    console.log(
+      `[automations] dispatch trigger=${input.triggerType} account=${input.accountId} contact=${input.contactId ?? 'none'} msg="${(input.context?.message_text ?? '').slice(0, 80)}" matched=${count}`,
+    )
+    if (count === 0) return
 
     for (const automation of automations as Automation[]) {
-      // triggerMatches is async now (LLM condition needs await). The
-      // existing keyword / interactive / tag branches are still sync
-      // internally and return immediately; only llm_condition awaits
-      // a real network call.
-      if (!(await triggerMatches(automation, input.context))) continue
+      const verdict = await triggerMatches(automation, input.context)
+      console.log(
+        `[automations] triggerMatches id=${automation.id} name="${automation.name}" type=${automation.trigger_type} verdict=${verdict ? 'YES' : 'NO'}`,
+      )
+      if (!verdict) continue
       try {
         await executeAutomation(automation, input)
       } catch (err) {
@@ -339,6 +343,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
       }
 
       const detail = await runStep(step, args)
+      console.log(`[automations] step ok type=${step.step_type} id=${step.id} detail="${detail.slice(0, 120)}"`)
       results.push({
         step_id: step.id,
         step_type: step.step_type,
@@ -347,6 +352,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      console.log(`[automations] step FAIL type=${step.step_type} id=${step.id} err="${msg.slice(0, 200)}"`)
       results.push({
         step_id: step.id,
         step_type: step.step_type,
@@ -369,6 +375,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
 
 async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string> {
   const db = supabaseAdmin()
+  console.log(`[automations] step start type=${step.step_type} id=${step.id}`)
 
   switch (step.step_type) {
     case 'send_message': {

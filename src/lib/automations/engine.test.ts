@@ -944,7 +944,6 @@ describe("send_webhook — GET method + query_params", () => {
       method: "POST",
       query_params: { brand: "Hyundai" },
       // body_template would be used
-      // @ts-expect-error — body_template is part of SendWebhookStepConfig
       body_template: '{"q":"x"}',
     } as unknown as Parameters<typeof setupGetWebhook>[0])
     const url = await captureSentUrl()
