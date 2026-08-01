@@ -74,6 +74,6 @@ describe("sendMediaMessage — payload shape", () => {
   it("throws when no link is provided", async () => {
     await expect(
       sendMediaMessage({ ...BASE, link: "", kind: "image" }),
-    ).rejects.toThrow(/requires a link/);
+    ).rejects.toThrow(/requires either link or id/);
   });
 });

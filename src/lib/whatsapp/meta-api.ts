@@ -266,8 +266,18 @@ export interface SendMediaMessageArgs {
   accessToken: string
   to: string
   kind: MediaKind
-  /** Public URL Meta fetches at send time. */
-  link: string
+  /**
+   * Public URL Meta fetches at send time. Required unless `id` is
+   * provided (e.g. a Resumable Upload handle from `uploadResumableMedia`).
+   * Meta does NOT accept WebP for image kinds — pass `id` with a
+   * pre-uploaded JPEG/PNG handle, or convert upstream.
+   */
+  link?: string
+  /**
+   * Pre-uploaded media handle from the Resumable Upload API. Takes
+   * precedence over `link` when both are set.
+   */
+  id?: string
   /** Optional caption — Meta caps at 1024 chars. Documents + images + videos accept it; audio does NOT. */
   caption?: string
   /** Document-only. Shown in the recipient's chat as the file name. Ignored for image/video/audio. */
@@ -290,14 +300,16 @@ export interface SendMediaMessageArgs {
 export async function sendMediaMessage(
   args: SendMediaMessageArgs,
 ): Promise<MetaSendResult> {
-  const { phoneNumberId, accessToken, to, kind, link, caption, filename, contextMessageId } = args
-  if (!link) throw new Error('sendMediaMessage requires a link.')
+  const { phoneNumberId, accessToken, to, kind, link, id, caption, filename, contextMessageId } = args
+  if (!link && !id) throw new Error('sendMediaMessage requires either link or id.')
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
 
   // Audio accepts neither caption nor filename per Meta's spec — adding
   // either yields a 400. image/video/document accept a caption; only
   // document accepts a filename.
-  const media: Record<string, unknown> = { link }
+  const media: Record<string, unknown> = {}
+  if (id) media.id = id
+  else media.link = link
   if (caption && kind !== 'audio') media.caption = caption
   if (kind === 'document' && filename) media.filename = filename
 

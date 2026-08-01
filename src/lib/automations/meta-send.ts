@@ -1,4 +1,10 @@
-import { sendTextMessage, sendTemplateMessage, sendMediaMessage } from '@/lib/whatsapp/meta-api'
+import {
+  sendTextMessage,
+  sendTemplateMessage,
+  sendMediaMessage,
+  uploadResumableMedia,
+} from '@/lib/whatsapp/meta-api'
+import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
 import {
   engineSendInteractiveButtons,
@@ -118,17 +124,98 @@ export async function engineSendImage(
     `[automations] engineSendImage to=${sanitized} phone_number_id=${config.phone_number_id} url=${args.imageUrl.slice(0, 120)} caption_len=${args.caption?.length ?? 0}`,
   )
 
+  // Meta rejects image/webp in image messages with error 131053
+  // ("WebP image uploads are not currently supported"). Detect the
+  // format from the URL's response and, if it's WebP, convert to JPEG
+  // with sharp and Resumable-Upload the result so Meta gets a
+  // pre-approved JPEG handle instead of fetching the WebP URL itself.
+  //
+  // Skip the conversion when the URL is already JPEG/PNG — most
+  // callers don't need the extra fetch+upload round trip.
+  const ALLOWED = new Set(['image/jpeg', 'image/png', 'image/jpg'])
+  let mediaHandle: string | undefined
+  let useOriginalLink = true
+  let responseForProbe: Response | null = null
+
+  // SSRF guard: the URL is account-controlled (template or
+  // webhook-derived); we fetch it server-side. Mirror the same check
+  // we use for send_webhook so a poisoned URL can't bounce us into a
+  // private network.
+  if (!(await isDeliverableUrl(args.imageUrl))) {
+    throw new Error(`engineSendImage: destination not allowed: ${args.imageUrl}`)
+  }
+
+  try {
+    const probe = await fetch(args.imageUrl, {
+      method: 'HEAD',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(8_000),
+    })
+    responseForProbe = probe
+  } catch {
+    // HEAD may be blocked; ignore — we'll fall through to a plain
+    // link-based send (Meta will still try and tell us via the
+    // status webhook if the format is wrong).
+    responseForProbe = null
+  }
+
+  const ct = (responseForProbe?.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+  if (ct && !ALLOWED.has(ct)) {
+    // Not JPEG/PNG — try to convert. Sharp accepts JPEG/PNG/WebP/GIF.
+    const appId = process.env.META_APP_ID
+    if (!appId) {
+      throw new Error(
+        `engineSendImage: image is ${ct || 'unknown format'} but Meta only accepts JPEG/PNG. Set META_APP_ID in the environment so we can Resumable-Upload a converted JPEG.`,
+      )
+    }
+    try {
+      const sharp = (await import('sharp')).default
+      // Full GET — sharp needs the bytes, HEAD just gave us the type.
+      const fullRes = await fetch(args.imageUrl, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!fullRes.ok) {
+        throw new Error(`image fetch returned ${fullRes.status}`)
+      }
+      const ab = await fullRes.arrayBuffer()
+      const jpegBuf = await sharp(Buffer.from(ab))
+        // .jpeg() defaults to quality=80 — fine for WhatsApp images
+        // (the platform re-encodes anyway).
+        .jpeg({ quality: 85 })
+        .toBuffer()
+      const { handle } = await uploadResumableMedia({
+        appId,
+        accessToken,
+        fileName: 'image.jpg',
+        mimeType: 'image/jpeg',
+        bytes: jpegBuf,
+      })
+      mediaHandle = handle
+      useOriginalLink = false
+      console.log(
+        `[automations] engineSendImage converted ${ct} → image/jpeg (${jpegBuf.byteLength} bytes), handle=${handle}`,
+      )
+    } catch (err) {
+      console.warn(
+        `[automations] engineSendImage conversion failed: ${err instanceof Error ? err.message : String(err)}. Falling back to original link.`,
+      )
+    }
+  }
+
   const attempt = async (phone: string): Promise<string> => {
     const r = await sendMediaMessage({
       phoneNumberId: config.phone_number_id,
       accessToken,
       to: phone,
       kind: 'image',
-      link: args.imageUrl,
+      ...(useOriginalLink
+        ? { link: args.imageUrl }
+        : { id: mediaHandle! }),
       caption: args.caption || undefined,
     })
     console.log(
-      `[automations] engineSendImage ok phone=${phone} message_id=${r.messageId}`,
+      `[automations] engineSendImage ok phone=${phone} message_id=${r.messageId} via=${useOriginalLink ? 'link' : 'handle'}`,
     )
     return r.messageId
   }
