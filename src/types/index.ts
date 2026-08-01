@@ -252,6 +252,18 @@ export interface Message {
    * badge in the inbox. Migration 033.
    */
   ai_generated?: boolean;
+  /**
+   * Timestamp of Meta's last webhook status callback for this message.
+   * NULL means Meta never called us back (webhook may not be configured,
+   * or the message was queued/filtered). Migration 038.
+   */
+  meta_status_updated_at?: string | null;
+  /**
+   * When Meta's status callback says 'failed', this stores the first
+   * error from the callback's `errors[]` array (formatted as
+   * "<code>: <title> (<message>)"). NULL otherwise. Migration 038.
+   */
+  meta_last_error?: string | null;
 }
 
 export type ReactionActor = 'customer' | 'agent';

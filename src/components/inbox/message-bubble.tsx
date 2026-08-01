@@ -30,18 +30,35 @@ interface MessageBubbleProps {
   onToggleReaction?: (emoji: string) => void;
 }
 
-function StatusIcon({ status }: { status: Message["status"] }) {
+function StatusIcon({
+  status,
+  metaStatusUpdatedAt,
+  metaLastError,
+}: {
+  status: Message["status"];
+  metaStatusUpdatedAt?: string | null;
+  metaLastError?: string | null;
+}) {
   switch (status) {
     case "sending":
       return <Clock className="h-3 w-3 text-muted-foreground" />;
     case "sent":
+      // The single ✓ means "Meta accepted the API call" — NOT
+      // "delivered". If we have a meta_status_updated_at, Meta has
+      // confirmed at least the sent transition. Without it, the
+      // status is still waiting on Meta's webhook callback (which
+      // usually never arrives if the webhook isn't configured).
       return <Check className="h-3 w-3 text-muted-foreground" />;
     case "delivered":
       return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
     case "read":
       return <CheckCheck className="h-3 w-3 text-blue-400" />;
     case "failed":
-      return <XCircle className="h-3 w-3 text-red-400" />;
+      return (
+        <span title={metaLastError ?? "Meta reported this message failed"}>
+          <XCircle className="h-3 w-3 text-red-400" />
+        </span>
+      );
     default:
       return null;
   }
@@ -326,7 +343,13 @@ export function MessageBubble({
           >
             {time}
           </span>
-          {isAgent && <StatusIcon status={message.status} />}
+          {isAgent && (
+            <StatusIcon
+              status={message.status}
+              metaStatusUpdatedAt={message.meta_status_updated_at}
+              metaLastError={message.meta_last_error}
+            />
+          )}
         </div>
       </div>
       {reactions && reactions.length > 0 && onToggleReaction && (

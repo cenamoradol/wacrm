@@ -354,15 +354,49 @@ async function handleStatusUpdate(status: {
   status: string
   timestamp: string
   recipient_id: string
+  // Optional error block from Meta when status='failed' — documented
+  // shape at https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/components#statuses-object
+  errors?: Array<{ code: number; title: string; message?: string }>
 }) {
-  // 1) Mirror onto messages (legacy behavior) — Meta's status values
-  //    already match the CHECK constraint on messages.status. No
-  //    `.select()`: message_id is NOT unique (migration 009 — Meta ids
-  //    repeat across numbers), so this updates 0..N rows and must not
-  //    assume a single row.
+  // Diagnostic — operators can grep this in the server logs to verify
+  // Meta is actually calling our webhook (vs. silently dropping
+  // status callbacks). The presence of this line after a send means
+  // "Meta acknowledged the API call AND has now decided the delivery
+  // fate of this message".
+  console.log(
+    `[whatsapp-webhook] status update message_id=${status.id} status=${status.status} recipient=${status.recipient_id} ts=${status.timestamp}${
+      status.errors?.length
+        ? ` errors=${JSON.stringify(status.errors)}`
+        : ''
+    }`,
+  )
+
+  // 1) Mirror onto messages — Meta's status values already match the
+  //    CHECK constraint on messages.status. We also stamp
+  //    meta_status_updated_at so the inbox can show "last confirmed
+  //    delivery at HH:MM" vs "Meta never called us back yet".
+  //    No `.select()`: message_id is NOT unique (migration 009 — Meta
+  //    ids repeat across numbers), so this updates 0..N rows and must
+  //    not assume a single row.
+  const tsIso = new Date(parseInt(status.timestamp) * 1000).toISOString()
+  const update: Record<string, unknown> = {
+    status: status.status,
+    meta_status_updated_at: tsIso,
+  }
+  if (status.status === 'failed' && status.errors?.length) {
+    // Persist the first error so the inbox can show it without an extra
+    // log dive. Format as "<code>: <title> (<message>)".
+    const e = status.errors[0]
+    update.meta_last_error = `${e.code}: ${e.title}${e.message ? ` (${e.message})` : ''}`
+  } else if (status.status !== 'failed') {
+    // Clear any prior error so a transient 'failed' doesn't linger
+    // after Meta recovers the message (rare, but happens during spam
+    // reviews).
+    update.meta_last_error = null
+  }
   const { error: msgErr } = await supabaseAdmin()
     .from('messages')
-    .update({ status: status.status })
+    .update(update)
     .eq('message_id', status.id)
 
   if (msgErr) {
@@ -377,8 +411,6 @@ async function handleStatusUpdate(status: {
   //    (added in migration 003). The aggregate trigger on
   //    broadcast_recipients re-derives the parent broadcast's
   //    sent/delivered/read/failed counts automatically.
-  const tsIso = new Date(parseInt(status.timestamp) * 1000).toISOString()
-
   const { data: recipient, error: recFetchErr } = await supabaseAdmin()
     .from('broadcast_recipients')
     .select('id, status')
