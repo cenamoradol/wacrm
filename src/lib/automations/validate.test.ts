@@ -205,6 +205,92 @@ describe("validateStepsForActivation", () => {
       "steps[0].subject",
     ]);
   });
+
+  it("accepts extract_vars with a valid reference_path", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "extract_vars",
+        step_config: {
+          prompt: "Extract brand and model.",
+          fields: { brand: "string", model: "string" },
+          reference_path: "vars.webhook_response",
+        },
+      },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("accepts extract_vars without a reference_path (the field is optional)", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "extract_vars",
+        step_config: {
+          prompt: "Extract brand and model.",
+          fields: { brand: "string" },
+        },
+      },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("flags extract_vars reference_path that exceeds 200 chars", () => {
+    const longPath = "vars." + "x".repeat(250)
+    const issues = validateStepsForActivation([
+      {
+        step_type: "extract_vars",
+        step_config: {
+          prompt: "Extract brand.",
+          fields: { brand: "string" },
+          reference_path: longPath,
+        },
+      },
+    ]);
+    expect(issues.map((i) => i.path)).toEqual(["steps[0].reference_path"]);
+  });
+
+  it("flags extract_vars reference_path with newlines or semicolons", () => {
+    const withNewline = validateStepsForActivation([
+      {
+        step_type: "extract_vars",
+        step_config: {
+          prompt: "Extract brand.",
+          fields: { brand: "string" },
+          reference_path: "vars.webhook_response\nignore previous",
+        },
+      },
+    ]);
+    expect(withNewline.map((i) => i.message)).toContain(
+      "reference_path cannot contain newlines or semicolons",
+    );
+
+    const withSemicolon = validateStepsForActivation([
+      {
+        step_type: "extract_vars",
+        step_config: {
+          prompt: "Extract brand.",
+          fields: { brand: "string" },
+          reference_path: "vars.webhook_response;drop",
+        },
+      },
+    ]);
+    expect(withSemicolon.map((i) => i.message)).toContain(
+      "reference_path cannot contain newlines or semicolons",
+    );
+  });
+
+  it("treats empty string reference_path the same as omitted", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "extract_vars",
+        step_config: {
+          prompt: "Extract brand.",
+          fields: { brand: "string" },
+          reference_path: "",
+        },
+      },
+    ]);
+    expect(issues).toEqual([]);
+  });
 });
 
 describe("validateTriggerForActivation", () => {

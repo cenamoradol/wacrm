@@ -1736,6 +1736,22 @@ function StepEditor({
               })}
             </p>
           </FieldBlock>
+          <FieldBlock label={t("config.extractVarsReferencePathLabel", { defaultValue: "Reference vocabulary (optional)" })}>
+            <Input
+              value={(cfg.reference_path as string) ?? ""}
+              onChange={(e) => set({ reference_path: e.target.value })}
+              placeholder={t("config.extractVarsReferencePathPlaceholder", {
+                defaultValue: "vars.webhook_response",
+              })}
+              className="bg-muted font-mono text-xs text-foreground"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {t("config.extractVarsReferencePathHint", {
+                defaultValue:
+                  "Path to a prior step's output (usually the JSON body of a send_webhook step). The LLM uses it to match customer typos and aliases to canonical names — e.g. customer writes \"crv\" and the catalog says \"CR-V\". Leave empty for plain free-form extraction.",
+              })}
+            </p>
+          </FieldBlock>
         </>
       )
     }

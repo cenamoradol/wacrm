@@ -661,6 +661,13 @@ export interface ExtractVarsStepConfig {
    *  JSON object with exactly these keys and types. Unknown keys
    *  are dropped; missing keys are left as undefined vars. */
   fields: Record<string, ExtractVarsFieldType>;
+  /** Optional. Path expression (interpolated against the run context,
+   *  e.g. `"vars.webhook_response"`) whose resolved value is injected
+   *  into the prompt as REFERENCE VOCABULARY — typically the JSON
+   *  response of a prior send_webhook step. Lets the LLM match
+   *  customer typos/aliases to canonical names. Omit for plain
+   *  free-form extraction (no reference). */
+  reference_path?: string;
 }
 
 export type ExtractVarsFieldType = 'string' | 'number' | 'boolean';

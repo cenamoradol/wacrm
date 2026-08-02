@@ -33,6 +33,7 @@ import { loadAiConfig } from '@/lib/ai/config'
 import { generateReply } from '@/lib/ai/generate'
 import { buildConversationContext } from '@/lib/ai/context'
 import { evaluateLlmCondition } from './llm-condition'
+import { renderReference, resolveReferencePath } from './render-reference'
 
 // ------------------------------------------------------------
 // Public API
@@ -824,6 +825,15 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         .map((k) => `  - "${k}": ${fieldDefs[k]}`)
         .join('\n')
 
+      // Optional reference vocabulary — usually the JSON body of a
+      // prior `send_webhook` step. Resolved here, not interpolated,
+      // because we want the raw value to pretty-print instead of
+      // `interpolate()`'s `JSON.stringify`. Empty/undefined path →
+      // skip injection (same behaviour as before this field existed).
+      const referenceText = cfg.reference_path
+        ? renderReference(resolveReferencePath(args.context.vars, cfg.reference_path))
+        : ''
+
       const systemPrompt =
         'You are a structured data extractor for a WhatsApp CRM automation. ' +
         'Read the customer message(s) below and return ONLY a JSON object whose keys ' +
@@ -834,7 +844,12 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         'Numbers must be JSON numbers (no quotes), booleans must be true/false, ' +
         'strings must be plain text without surrounding quotes in the JSON output.'
 
+      const referenceBlock = referenceText
+        ? `REFERENCE VOCABULARY (canonical names/values for this business — use these to match the customer's request, even with typos or aliases; if the customer's mention is not in the vocabulary, OMIT the field rather than guess):\n${referenceText}\n\n`
+        : ''
+
       const userContent =
+        referenceBlock +
         `REQUESTED FIELDS:\n${fieldsSpec}\n\n` +
         `INSTRUCTION:\n${cfg.prompt.trim()}\n\n` +
         `LATEST CUSTOMER MESSAGE:\n${(args.context.message_text ?? '').toString().trim()}\n\n` +

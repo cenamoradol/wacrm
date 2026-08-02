@@ -1099,6 +1099,142 @@ describe("extract_vars step", () => {
     const finalUpdate = h.state.logUpdates.at(-1) as { status?: string } | undefined
     expect(finalUpdate?.status).toBe("success")
   })
+
+  // ----------------------------------------------------------
+  // reference_path: lets `extract_vars` read a prior step's vars
+  // (typically the JSON body of a send_webhook catalog fetch) and
+  // inject it as REFERENCE VOCABULARY so the LLM can match typos.
+  // ----------------------------------------------------------
+  function setupExtractStepWithReference(
+    fields: Record<string, "string" | "number" | "boolean">,
+    referencePath: string,
+    initialVars: Record<string, unknown>,
+  ) {
+    h.state.owned = { id: "c1" }
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "extract-with-ref",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }]
+    h.state.steps = [{
+      id: "s1",
+      automation_id: "a1",
+      step_type: "extract_vars",
+      position: 0,
+      parent_step_id: null,
+      step_config: {
+        prompt: "Extract brand, model and year from the customer message.",
+        fields,
+        reference_path: referencePath,
+      },
+    }]
+    return runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: { message_text: "tienes crv 2020?", conversation_id: "conv-1", vars: initialVars },
+    })
+  }
+
+  it("injects the resolved reference as REFERENCE VOCABULARY when the path matches vars", async () => {
+    vi.mocked(generateReply).mockResolvedValueOnce({
+      text: JSON.stringify({ brand: "Honda", model: "CR-V", year: 2020 }),
+      handoff: false,
+      usage: null,
+    })
+    const catalog = {
+      brands: [
+        { name: "Honda", models: [{ name: "CR-V", aliases: ["crv", "cr-v"] }] },
+      ],
+    }
+    await setupExtractStepWithReference(
+      { brand: "string", model: "string", year: "number" },
+      "vars.webhook_response",
+      { webhook_response: catalog },
+    )
+    expect(vi.mocked(generateReply)).toHaveBeenCalledTimes(1)
+    const callArgs = vi.mocked(generateReply).mock.calls[0][0]
+    const userContent = callArgs.messages[0].content as string
+    expect(userContent).toContain("REFERENCE VOCABULARY")
+    expect(userContent).toContain('"CR-V"')
+    expect(userContent).toContain('"Honda"')
+    expect(userContent).toContain("tienes crv 2020?")
+  })
+
+  it("omits the reference block silently when the path doesn't resolve", async () => {
+    vi.mocked(generateReply).mockResolvedValueOnce({
+      text: JSON.stringify({ brand: "Honda" }),
+      handoff: false,
+      usage: null,
+    })
+    // No vars.webhook_response set — nothing to inject, behaves like
+    // the original extract_vars (no reference field existed).
+    await setupExtractStepWithReference(
+      { brand: "string" },
+      "vars.webhook_response",
+      {},
+    )
+    const callArgs = vi.mocked(generateReply).mock.calls[0][0]
+    const userContent = callArgs.messages[0].content as string
+    expect(userContent).not.toContain("REFERENCE VOCABULARY")
+  })
+
+  it("supports nested paths (vars.webhook_response.results[0])", async () => {
+    vi.mocked(generateReply).mockResolvedValueOnce({
+      text: JSON.stringify({ brand: "Honda" }),
+      handoff: false,
+      usage: null,
+    })
+    await setupExtractStepWithReference(
+      { brand: "string" },
+      "vars.webhook_response.results[0]",
+      { webhook_response: { results: [{ brands: ["Honda", "Toyota"] }] } },
+    )
+    const callArgs = vi.mocked(generateReply).mock.calls[0][0]
+    const userContent = callArgs.messages[0].content as string
+    expect(userContent).toContain("REFERENCE VOCABULARY")
+    expect(userContent).toContain('"Honda"')
+  })
+
+  it("truncates oversized reference payloads to keep the prompt within budget", async () => {
+    vi.mocked(generateReply).mockResolvedValueOnce({
+      text: JSON.stringify({ brand: "Honda" }),
+      handoff: false,
+      usage: null,
+    })
+    // 12KB of repetitive text — well over the 8KB cap.
+    const huge = "x".repeat(12 * 1024)
+    await setupExtractStepWithReference(
+      { brand: "string" },
+      "vars.webhook_response",
+      { webhook_response: huge },
+    )
+    const callArgs = vi.mocked(generateReply).mock.calls[0][0]
+    const userContent = callArgs.messages[0].content as string
+    expect(userContent).toContain("[truncated]")
+    expect(userContent).not.toContain("x".repeat(12 * 1024))
+  })
+
+  it("pretty-prints object/array references and passes strings through", async () => {
+    vi.mocked(generateReply).mockResolvedValueOnce({
+      text: JSON.stringify({ brand: "Honda" }),
+      handoff: false,
+      usage: null,
+    })
+    await setupExtractStepWithReference(
+      { brand: "string" },
+      "vars.webhook_response",
+      { webhook_response: { brands: ["Honda", "Toyota"] } },
+    )
+    const callArgs = vi.mocked(generateReply).mock.calls[0][0]
+    const userContent = callArgs.messages[0].content as string
+    // Pretty-printed JSON has newlines + indentation between keys.
+    expect(userContent).toMatch(/"brands":\s*\[\s*"Honda"/)
+  })
 })
 
 // ============================================================
@@ -1272,7 +1408,7 @@ describe("send_images step", () => {
 // lets the webhook suppress the AI auto-reply when an automation
 // already replied to the customer.
 // ============================================================
-describe("runAutomationsForTrigger � messagesSent counter", () => {
+describe("runAutomationsForTrigger � messagesSent counter", () => {
   it("returns 0 when no automations match", async () => {
     h.state.automations = [] // none match
     const result = await runAutomationsForTrigger({

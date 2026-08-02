@@ -187,6 +187,24 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
           }
         }
       }
+      if (c.reference_path !== undefined && c.reference_path !== null && c.reference_path !== '') {
+        const rp = String(c.reference_path)
+        // Length cap keeps the prompt builder honest — anything past
+        // ~200 chars is almost certainly a mistake (paths look like
+        // "vars.webhook_response.results[0].items"). Newlines or
+        // semicolons would let someone sneak prompt content past us.
+        if (rp.length > 200) {
+          issues.push({
+            path: `${path}.reference_path`,
+            message: 'reference_path must be 200 characters or less',
+          })
+        } else if (/[\r\n;]/.test(rp)) {
+          issues.push({
+            path: `${path}.reference_path`,
+            message: 'reference_path cannot contain newlines or semicolons',
+          })
+        }
+      }
       break
     case 'send_images':
       if (!nonEmpty(c.image_path)) {
