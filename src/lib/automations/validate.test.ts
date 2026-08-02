@@ -288,9 +288,144 @@ describe("validateStepsForActivation", () => {
           reference_path: "",
         },
       },
-    ]);
-    expect(issues).toEqual([]);
-  });
+    ])
+    expect(issues).toEqual([])
+  })
+})
+
+describe("validateStepsForActivation — condition (vars_value subject)", () => {
+  it("accepts vars_value with is_empty and no operand-required value", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "condition",
+        step_config: {
+          subject: "vars_value",
+          operand: "vars.webhook_response.results",
+          operator: "is_empty",
+        },
+      },
+    ])
+    expect(issues).toEqual([])
+  })
+
+  it("accepts vars_value without operator (defaults to is_empty)", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "condition",
+        step_config: {
+          subject: "vars_value",
+          operand: "vars.results",
+        },
+      },
+    ])
+    expect(issues).toEqual([])
+  })
+
+  it("flags vars_value with no operand", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "condition",
+        step_config: {
+          subject: "vars_value",
+          operator: "is_empty",
+        },
+      },
+    ])
+    expect(issues.map((i) => i.path)).toContain("steps[0].operand")
+  })
+
+  it("flags vars_value with unknown operator", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "condition",
+        step_config: {
+          subject: "vars_value",
+          operand: "vars.x",
+          operator: "starts_with",
+        },
+      },
+    ])
+    expect(issues.map((i) => i.path)).toContain("steps[0].operator")
+  })
+
+  it("requires value for equals / not_equals / contains", () => {
+    for (const op of ["equals", "not_equals", "contains"]) {
+      const issues = validateStepsForActivation([
+        {
+          step_type: "condition",
+          step_config: {
+            subject: "vars_value",
+            operand: "vars.x",
+            operator: op,
+            value: "",
+          },
+        },
+      ])
+      expect(issues.map((i) => i.path)).toContain(`steps[0].value`)
+    }
+  })
+
+  it("accepts vars_value with equals + value", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "condition",
+        step_config: {
+          subject: "vars_value",
+          operand: "vars.brand",
+          operator: "equals",
+          value: "Honda",
+        },
+      },
+    ])
+    expect(issues).toEqual([])
+  })
+
+  it("does not require value for is_empty / is_not_empty", () => {
+    for (const op of ["is_empty", "is_not_empty"]) {
+      const issues = validateStepsForActivation([
+        {
+          step_type: "condition",
+          step_config: {
+            subject: "vars_value",
+            operand: "vars.x",
+            operator: op,
+          },
+        },
+      ])
+      expect(issues).toEqual([])
+    }
+  })
+
+  it("flags operand longer than 200 chars", () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: "condition",
+        step_config: {
+          subject: "vars_value",
+          operand: "vars." + "x".repeat(250),
+          operator: "is_empty",
+        },
+      },
+    ])
+    expect(issues.map((i) => i.path)).toContain("steps[0].operand")
+  })
+
+  it("does not apply the operator/value rules to other subjects", () => {
+    // A message_content condition without value would normally fail its
+    // own way (the engine treats empty value as substring of empty),
+    // but it must NOT trigger the vars_value-specific error paths.
+    const issues = validateStepsForActivation([
+      {
+        step_type: "condition",
+        step_config: {
+          subject: "message_content",
+          operand: "foo",
+          value: "bar",
+        },
+      },
+    ])
+    expect(issues).toEqual([])
+  })
 });
 
 describe("validateTriggerForActivation", () => {

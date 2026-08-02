@@ -1162,9 +1162,55 @@ async function evaluateCondition(cfg: ConditionStepConfig, args: ExecuteArgs): P
       const t = parse(to)
       return f <= t ? mins >= f && mins < t : mins >= f || mins < t
     }
+    case 'vars_value': {
+      // Universal branch on any value in `args.context.vars`. Path is
+      // written the same way as in query_params / image_path —
+      // "vars.webhook_response.results" or just "webhook_response.results".
+      // Default operator is `is_empty` so a newly-added branch with no
+      // operator behaves as the obvious "did the webhook find anything?".
+      if (!cfg.operand) return false
+      const op = cfg.operator ?? 'is_empty'
+      const raw = resolvePath(
+        args.context.vars,
+        parseDottedPath(stripVarsPrefix(cfg.operand)),
+      )
+      switch (op) {
+        case 'is_empty':
+          return isEmptyish(raw)
+        case 'is_not_empty':
+          return !isEmptyish(raw)
+        case 'equals':
+          return String(raw ?? '') === String(cfg.value ?? '')
+        case 'not_equals':
+          return String(raw ?? '') !== String(cfg.value ?? '')
+        case 'contains':
+          return String(raw ?? '')
+            .toLowerCase()
+            .includes(String(cfg.value ?? '').toLowerCase())
+        default:
+          return false
+      }
+    }
     default:
       return false
   }
+}
+
+/** Empty-ish = null/undefined, empty string, empty array, empty object. */
+function isEmptyish(v: unknown): boolean {
+  if (v == null || v === '') return true
+  if (Array.isArray(v)) return v.length === 0
+  if (typeof v === 'object') return Object.keys(v as object).length === 0
+  return false
+}
+
+/** Strip an optional `vars.` prefix from a path. `interpolate()` and the
+ *  path parsers here both expect the bare-root form, so accepting either
+ *  shape at the call site removes a small foot-gun. */
+function stripVarsPrefix(p: string): string {
+  const s = p.trim()
+  if (s === 'vars') return ''
+  return s.startsWith('vars.') ? s.slice(5) : s
 }
 
 function waitMs(cfg: WaitStepConfig): number {

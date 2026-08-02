@@ -599,13 +599,26 @@ export type ConditionSubject =
   | 'contact_field'
   | 'tag_presence'
   | 'message_content'
-  | 'time_of_day';
+  | 'time_of_day'
+  | 'vars_value';
+
+export type ConditionOperator =
+  | 'is_empty'
+  | 'is_not_empty'
+  | 'equals'
+  | 'not_equals'
+  | 'contains';
 
 export interface ConditionStepConfig {
   subject: ConditionSubject;
-  /** e.g. field name, tag id, substring, or "HH:mm-HH:mm" depending on subject */
+  /** e.g. field name, tag id, substring, or "HH:mm-HH:mm" depending on subject.
+   *  For `vars_value`: a path expression against `vars` (e.g. `vars.webhook_response.results`). */
   operand?: string;
-  /** For contact_field equals / message_content contains — comparison value */
+  /** For `vars_value`: the comparison operator (default `is_empty`).
+   *  `is_empty` / `is_not_empty` ignore `value`.
+   *  `equals` / `not_equals` / `contains` compare against `value`. */
+  operator?: ConditionOperator;
+  /** For contact_field equals / message_content contains / vars_value equals|not_equals|contains — comparison value */
   value?: string;
 }
 

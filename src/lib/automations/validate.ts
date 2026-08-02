@@ -119,11 +119,46 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
       }
       break
     case 'condition':
+      // Subject + operand are independently required for every subject,
+      // including vars_value — so flag them as separate `if`s and run
+      // the subject-specific rules (vars_value only, today) on top.
       if (!nonEmpty(c.subject)) {
         issues.push({ path: `${path}.subject`, message: 'condition subject is required' })
       }
       if (!nonEmpty(c.operand)) {
         issues.push({ path: `${path}.operand`, message: 'condition operand is required' })
+      }
+      if (c.subject === 'vars_value') {
+        // vars_value is the only subject that needs an explicit operator
+        // + value validation — the others all use either a fixed shape
+        // (time_of_day operand "HH:mm-HH:mm") or have `value` as optional.
+        const op = c.operator
+        const validOps = ['is_empty', 'is_not_empty', 'equals', 'not_equals', 'contains']
+        if (op != null && !validOps.includes(String(op))) {
+          issues.push({
+            path: `${path}.operator`,
+            message: `vars_value operator must be one of: ${validOps.join(', ')}`,
+          })
+        }
+        if (
+          op != null &&
+          ['equals', 'not_equals', 'contains'].includes(String(op)) &&
+          !nonEmpty(c.value)
+        ) {
+          issues.push({
+            path: `${path}.value`,
+            message: `vars_value "${String(op)}" requires a non-empty value`,
+          })
+        }
+        // Operand cap mirrors the reference_path cap — anything past
+        // 200 chars is almost certainly a mistake and keeps prompt-side
+        // safety in step with the rest of the engine.
+        if (nonEmpty(c.operand) && String(c.operand).length > 200) {
+          issues.push({
+            path: `${path}.operand`,
+            message: 'operand must be 200 characters or less',
+          })
+        }
       }
       break
     case 'send_webhook':

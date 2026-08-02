@@ -970,12 +970,23 @@
           "tag_presence": "Tag presence",
           "contact_field": "Contact field",
           "message_content": "Message content",
-          "time_of_day": "Time of day"
+          "time_of_day": "Time of day",
+          "vars_value": "Variable value"
         },
         "operandLabel": "Operand",
         "placeholderTime": "HH:mm-HH:mm",
         "placeholderContact": "name / email / company",
         "placeholderTag": "tag id",
+        "placeholderVarsValue": "vars.webhook_response.results",
+        "operatorLabel": "Operator",
+        "operators": {
+          "is_empty": "is empty",
+          "is_not_empty": "is not empty",
+          "equals": "equals",
+          "not_equals": "does not equal",
+          "contains": "contains"
+        },
+        "varsValueHint": "Branches on any value in vars. Useful for \"did the previous webhook find anything?\" — pair with operator is_empty on vars.webhook_response.results.",
         "urlLabel": "URL",
         "headersLabel": "Headers",
         "placeholderHeaders": "{\"Authorization\": \"Bearer ...\"}",

@@ -967,15 +967,26 @@
         },
         "subjectLabel": "대상",
         "subjects": {
-          "tag_presence": "태그 존재 여부",
+          "tag_presence": "태그 보유",
           "contact_field": "연락처 필드",
           "message_content": "메시지 내용",
-          "time_of_day": "시간대"
+          "time_of_day": "시간대",
+          "vars_value": "변수 값"
         },
         "operandLabel": "피연산자",
         "placeholderTime": "HH:mm-HH:mm",
         "placeholderContact": "이름 / 이메일 / 회사",
         "placeholderTag": "태그 id",
+        "placeholderVarsValue": "vars.webhook_response.results",
+        "operatorLabel": "연산자",
+        "operators": {
+          "is_empty": "비어 있음",
+          "is_not_empty": "비어 있지 않음",
+          "equals": "같음",
+          "not_equals": "같지 않음",
+          "contains": "포함"
+        },
+        "varsValueHint": "vars의 모든 값으로 분기합니다. \"이전 웹훅이 결과를 찾았는가?\"에 유용 — vars.webhook_response.results에 is_empty 연산자를 함께 사용하세요.",
         "urlLabel": "URL",
         "headersLabel": "헤더",
         "placeholderHeaders": "{\"Authorization\": \"Bearer ...\"}",

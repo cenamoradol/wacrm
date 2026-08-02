@@ -1452,38 +1452,76 @@ function StepEditor({
           </FieldBlock>
         </div>
       )
-    case "condition":
+    case "condition": {
+      // Two helper sets so the operand placeholder and the value-input
+      // visibility track the picked subject. `vars_value` is the only
+      // one that also surfaces an operator dropdown.
+      const subject = (cfg.subject as string) ?? "tag_presence"
+      const operandPlaceholder =
+        subject === "time_of_day"
+          ? t("config.placeholderTime")
+          : subject === "contact_field"
+          ? t("config.placeholderContact")
+          : subject === "tag_presence"
+          ? t("config.placeholderTag")
+          : subject === "vars_value"
+          ? t("config.placeholderVarsValue")
+          : ""
+      const operator = (cfg.operator as string) ?? "is_empty"
+      const showValueInput =
+        subject === "contact_field" ||
+        subject === "message_content" ||
+        (subject === "vars_value" &&
+          ["equals", "not_equals", "contains"].includes(operator))
       return (
         <>
           <FieldBlock label={t("config.subjectLabel")}>
             <select
-              value={(cfg.subject as string) ?? "tag_presence"}
-              onChange={(e) => set({ subject: e.target.value })}
+              value={subject}
+              onChange={(e) => {
+                // Switching subject resets operator so a leftover
+                // `equals` from one subject can't leak into another
+                // (vars_value is the only one that uses operator).
+                set({ subject: e.target.value, operator: "is_empty" })
+              }}
               className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
             >
               <option value="tag_presence">{t("config.subjects.tag_presence")}</option>
               <option value="contact_field">{t("config.subjects.contact_field")}</option>
               <option value="message_content">{t("config.subjects.message_content")}</option>
               <option value="time_of_day">{t("config.subjects.time_of_day")}</option>
+              <option value="vars_value">{t("config.subjects.vars_value")}</option>
             </select>
           </FieldBlock>
           <FieldBlock label={t("config.operandLabel")}>
             <Input
-              placeholder={
-                cfg.subject === "time_of_day"
-                  ? t("config.placeholderTime")
-                  : cfg.subject === "contact_field"
-                  ? t("config.placeholderContact")
-                  : cfg.subject === "tag_presence"
-                  ? t("config.placeholderTag")
-                  : ""
-              }
+              placeholder={operandPlaceholder}
               value={(cfg.operand as string) ?? ""}
               onChange={(e) => set({ operand: e.target.value })}
               className="bg-muted text-foreground"
             />
           </FieldBlock>
-          {(cfg.subject === "contact_field" || cfg.subject === "message_content") && (
+          {subject === "vars_value" && (
+            <>
+              <FieldBlock label={t("config.operatorLabel", { defaultValue: "Operator" })}>
+                <select
+                  value={operator}
+                  onChange={(e) => set({ operator: e.target.value })}
+                  className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
+                >
+                  <option value="is_empty">{t("config.operators.is_empty")}</option>
+                  <option value="is_not_empty">{t("config.operators.is_not_empty")}</option>
+                  <option value="equals">{t("config.operators.equals")}</option>
+                  <option value="not_equals">{t("config.operators.not_equals")}</option>
+                  <option value="contains">{t("config.operators.contains")}</option>
+                </select>
+              </FieldBlock>
+              <p className="-mt-2 text-[11px] text-muted-foreground">
+                {t("config.varsValueHint")}
+              </p>
+            </>
+          )}
+          {showValueInput && (
             <FieldBlock label="Value">
               <Input
                 value={(cfg.value as string) ?? ""}
@@ -1494,6 +1532,7 @@ function StepEditor({
           )}
         </>
       )
+    }
     case "send_webhook": {
       // Determine the implicit method so the toggle reflects the user's
       // current intent without forcing them to flip it on every save.

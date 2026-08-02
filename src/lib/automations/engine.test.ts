@@ -57,8 +57,31 @@ vi.mock("./admin-client", () => {
       }
       return { data: { steps_executed: [], status: "success" }, error: null };
     }
-    if (table === "automation_steps") return { data: state.steps, error: null };
-    return { data: null, error: null };
+    if (table === "automation_steps") {
+      // The real engine applies `parent_step_id`/`branch`/`gte`/etc. via
+      // PostgREST; our in-memory mock has to honor those filters or a
+      // condition step's branch recursion re-fetches the parent condition
+      // step and loops. (Caught once the condition test was added — the
+      // pre-existing top-level tests all use `parent_step_id: null`, which
+      // also matches under the loose filter, so they were unaffected.)
+      let rows = state.steps as Array<Record<string, unknown>>
+      for (const [op, key, value] of ops.filters) {
+        if (op === "eq") {
+          rows = rows.filter((r) => {
+            if (key === "parent_step_id") return r.parent_step_id === value
+            if (key === "branch") return r.parent_branch === value
+            return r[key] === value
+          })
+        } else if (op === "is") {
+          rows = rows.filter((r) => {
+            if (key === "parent_step_id") return r.parent_step_id === value
+            return r[key] === value
+          })
+        }
+      }
+      return { data: rows, error: null }
+    }
+    return { data: null, error: null }
   }
 
   function builder(table: string) {
@@ -72,11 +95,11 @@ vi.mock("./admin-client", () => {
       select: () => b,
       insert: (p: unknown) => ((ops.type = "insert"), (ops.payload = p), b),
       update: (p: unknown) => ((ops.type = "update"), (ops.payload = p), b),
-      delete: () => ((ops.type = "delete"), b),
+      delete: () => b,
       upsert: (p: unknown) => ((ops.type = "upsert"), (ops.payload = p), b),
       eq: (k: string, v: unknown) => (ops.filters.push(["eq", k, v]), b),
-      gte: () => b,
-      is: () => b,
+      gte: (k: string, v: unknown) => (ops.filters.push(["gte", k, v]), b),
+      is: (k: string, v: unknown) => (ops.filters.push(["is", k, v]), b),
       order: () => b,
       limit: () => b,
       single: () => Promise.resolve(resolve(ops)),
@@ -1466,5 +1489,209 @@ describe("runAutomationsForTrigger � messagesSent counter", () => {
       },
     })
     expect(result.messagesSent).toBe(5)
+  })
+})
+
+// ============================================================
+// condition step — vars_value subject: branches on any value
+// in `args.context.vars`. Universal companion to extract_vars:
+// lets you route "did the webhook find anything?" into yes/no
+// branches (e.g. send_images when results is non-empty, send a
+// fallback message when it's empty).
+// ============================================================
+describe("condition step — vars_value", () => {
+  function setupConditionBranch(
+    conditionStep: { subject: string; operand?: string; operator?: string; value?: string },
+    yesSteps: Array<{ step_type: string; step_config: Record<string, unknown> }>,
+    noSteps: Array<{ step_type: string; step_config: Record<string, unknown> }>,
+    initialVars: Record<string, unknown> = {},
+  ) {
+    h.state.owned = { id: "c1" }
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "condition-vars-value",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }]
+    h.state.steps = [
+      {
+        id: "s1",
+        automation_id: "a1",
+        step_type: "condition",
+        position: 0,
+        parent_step_id: null,
+        step_config: conditionStep,
+      },
+      ...yesSteps.map((s, i) => ({
+        id: `yes-${i}`,
+        automation_id: "a1",
+        step_type: s.step_type,
+        position: i,
+        parent_step_id: "s1",
+        parent_branch: "yes",
+        step_config: s.step_config,
+      })),
+      ...noSteps.map((s, i) => ({
+        id: `no-${i}`,
+        automation_id: "a1",
+        step_type: s.step_type,
+        position: i,
+        parent_step_id: "s1",
+        parent_branch: "no",
+        step_config: s.step_config,
+      })),
+    ]
+    return runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: { message_text: "test", conversation_id: "conv-1", vars: initialVars },
+    })
+  }
+
+  it("is_empty: takes yes branch when array is empty (the user's primary use case)", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.webhook_response.results", operator: "is_empty" },
+      [{ step_type: "send_message", step_config: { text: "no tenemos ese modelo" } }],
+      [{ step_type: "send_message", step_config: { text: "tenemos stock" } }],
+      { webhook_response: { results: [], total: 0 } },
+    )
+    expect(vi.mocked(engineSendText)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("no tenemos ese modelo")
+  })
+
+  it("is_empty: takes no branch when array has items", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.webhook_response.results", operator: "is_empty" },
+      [{ step_type: "send_message", step_config: { text: "empty" } }],
+      [{ step_type: "send_message", step_config: { text: "found" } }],
+      { webhook_response: { results: [{ id: "v1" }], total: 1 } },
+    )
+    expect(vi.mocked(engineSendText)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("found")
+  })
+
+  it("is_not_empty: inverts the empty check", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.webhook_response.results", operator: "is_not_empty" },
+      [{ step_type: "send_message", step_config: { text: "found" } }],
+      [{ step_type: "send_message", step_config: { text: "empty" } }],
+      { webhook_response: { results: [{ id: "v1" }] } },
+    )
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("found")
+  })
+
+  it("equals: compares string vars", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.brand", operator: "equals", value: "Honda" },
+      [{ step_type: "send_message", step_config: { text: "es Honda" } }],
+      [{ step_type: "send_message", step_config: { text: "no es Honda" } }],
+      { brand: "Honda" },
+    )
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("es Honda")
+  })
+
+  it("not_equals: takes no branch when value matches", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.brand", operator: "not_equals", value: "Honda" },
+      [{ step_type: "send_message", step_config: { text: "es Honda" } }],
+      [{ step_type: "send_message", step_config: { text: "no es Honda" } }],
+      { brand: "Honda" },
+    )
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("no es Honda")
+  })
+
+  it("contains: substring match is case-insensitive", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.brand", operator: "contains", value: "ond" },
+      [{ step_type: "send_message", step_config: { text: "match" } }],
+      [{ step_type: "send_message", step_config: { text: "no match" } }],
+      { brand: "Honda" },
+    )
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("match")
+  })
+
+  it("treats missing operand as a no-match (the no branch runs)", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      // No operand — evaluateCondition returns false → no branch runs.
+      { subject: "vars_value" },
+      [{ step_type: "send_message", step_config: { text: "yes" } }],
+      [{ step_type: "send_message", step_config: { text: "no" } }],
+      { brand: "Honda" },
+    )
+    expect(vi.mocked(engineSendText)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("no")
+  })
+
+  it("treats unresolvable path as is_empty (so the yes branch fires)", async () => {
+    // vars.nonexistent doesn't resolve → is_empty matches.
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.nonexistent", operator: "is_empty" },
+      [{ step_type: "send_message", step_config: { text: "missing branch fired" } }],
+      [{ step_type: "send_message", step_config: { text: "exists branch" } }],
+      {},
+    )
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("missing branch fired")
+  })
+
+  it("is_empty treats empty object, empty string, and null the same", async () => {
+    vi.mocked(engineSendText).mockClear()
+    for (const value of [{}, "", null]) {
+      vi.mocked(engineSendText).mockClear()
+      await setupConditionBranch(
+        { subject: "vars_value", operand: "vars.x", operator: "is_empty" },
+        [{ step_type: "send_message", step_config: { text: "empty" } }],
+        [{ step_type: "send_message", step_config: { text: "non-empty" } }],
+        { x: value },
+      )
+      expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("empty")
+    }
+  })
+
+  it("defaults to is_empty when operator is omitted (sensible default for the common case)", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      // No operator field — should default to is_empty.
+      { subject: "vars_value", operand: "vars.results" },
+      [{ step_type: "send_message", step_config: { text: "empty" } }],
+      [{ step_type: "send_message", step_config: { text: "non-empty" } }],
+      { results: [] },
+    )
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("empty")
+  })
+
+  it("strips an optional 'vars.' prefix on the operand", async () => {
+    // Some users write "vars.x.y" in the UI, some write "x.y" — both
+    // should resolve the same way.
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.brand", operator: "equals", value: "Honda" },
+      [{ step_type: "send_message", step_config: { text: "matched" } }],
+      [{ step_type: "send_message", step_config: { text: "no match" } }],
+      { brand: "Honda" },
+    )
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("matched")
+  })
+
+  it("resolves nested paths (vars.webhook_response.results[0].id)", async () => {
+    vi.mocked(engineSendText).mockClear()
+    await setupConditionBranch(
+      { subject: "vars_value", operand: "vars.webhook_response.results[0].id", operator: "equals", value: "v1" },
+      [{ step_type: "send_message", step_config: { text: "first id is v1" } }],
+      [{ step_type: "send_message", step_config: { text: "first id is not v1" } }],
+      { webhook_response: { results: [{ id: "v1" }] } },
+    )
+    expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe("first id is v1")
   })
 })
