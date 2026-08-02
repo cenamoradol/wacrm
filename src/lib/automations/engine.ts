@@ -53,6 +53,18 @@ export interface AutomationContext {
   interactive_reply_id?: string
 }
 
+export interface AutomationDispatchResult {
+  /**
+   * Number of WhatsApp messages successfully sent by automations in
+   * this dispatch. 0 means no automation sent anything (no match,
+   * all skipped, or all failed). The webhook uses this to suppress
+   * the AI auto-reply when an automation already handled the
+   * conversation — otherwise the customer gets the automation's
+   * response AND a redundant AI-generated answer.
+   */
+  messagesSent: number
+}
+
 export interface DispatchInput {
   /** Account-level tenancy key. Drives the lookup of which active
    *  automations to fire — `automations.account_id` is the tenant
@@ -73,7 +85,10 @@ export interface DispatchInput {
  * All errors are caught and logged; per-automation failures are
  * recorded into automation_logs with status='failed'.
  */
-export async function runAutomationsForTrigger(input: DispatchInput): Promise<void> {
+export async function runAutomationsForTrigger(
+  input: DispatchInput,
+): Promise<AutomationDispatchResult> {
+  const result: AutomationDispatchResult = { messagesSent: 0 }
   try {
     const db = supabaseAdmin()
 
@@ -93,11 +108,11 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
         .maybeSingle()
       if (ownErr) {
         console.error('[automations] contact ownership check failed:', ownErr)
-        return
+        return result
       }
       if (!owned) {
         console.warn('[automations] contact not in account, refusing dispatch', input.contactId)
-        return
+        return result
       }
     }
 
@@ -110,13 +125,13 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
 
     if (error) {
       console.error('[automations] fetch failed:', error)
-      return
+      return result
     }
     const count = automations?.length ?? 0
     console.log(
       `[automations] dispatch trigger=${input.triggerType} account=${input.accountId} contact=${input.contactId ?? 'none'} msg="${(input.context?.message_text ?? '').slice(0, 80)}" matched=${count}`,
     )
-    if (count === 0) return
+    if (count === 0) return result
 
     for (const automation of automations as Automation[]) {
       const verdict = await triggerMatches(automation, input.context)
@@ -125,7 +140,7 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
       )
       if (!verdict) continue
       try {
-        await executeAutomation(automation, input)
+        result.messagesSent += await executeAutomation(automation, input)
       } catch (err) {
         console.error('[automations] execute failed:', automation.id, err)
       }
@@ -133,6 +148,7 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
   } catch (err) {
     console.error('[automations] dispatch failed:', err)
   }
+  return result
 }
 
 /**
@@ -178,6 +194,7 @@ export async function resumePendingExecution(pending: {
       startPosition: pending.next_step_position,
       logId: pending.log_id,
       triggerEvent: 'resumed_wait',
+      messagesSent: 0,
     })
     await markPending(pending.id, 'done')
   } catch (err) {
@@ -190,8 +207,14 @@ export async function resumePendingExecution(pending: {
 // Internal execution
 // ------------------------------------------------------------
 
-async function executeAutomation(automation: Automation, input: DispatchInput) {
+async function executeAutomation(
+  automation: Automation,
+  input: DispatchInput,
+): Promise<number> {
   const db = supabaseAdmin()
+  // No local counter here — `args.messagesSent` is bumped inside
+  // executeStepsFrom (and runStep) and returned at the end. Kept the
+  // return type as `Promise<number>` so the caller can act on it.
 
   const { data: log, error: logErr } = await db
     .from('automation_logs')
@@ -221,10 +244,10 @@ async function executeAutomation(automation: Automation, input: DispatchInput) {
 
   if (logErr || !log) {
     console.error('[automations] cannot create log:', logErr)
-    return
+    return 0
   }
 
-  await executeStepsFrom({
+  const messagesSentLocal = await executeStepsFrom({
     automation,
     contactId: input.contactId ?? null,
     context: input.context ?? {},
@@ -233,6 +256,7 @@ async function executeAutomation(automation: Automation, input: DispatchInput) {
     startPosition: 0,
     logId: log.id,
     triggerEvent: input.triggerType,
+    messagesSent: 0,
   })
 
   // Atomic counter update via the SQL function from migration 007.
@@ -245,6 +269,8 @@ async function executeAutomation(automation: Automation, input: DispatchInput) {
   if (rpcErr) {
     console.error('[automations] increment counter failed:', rpcErr)
   }
+
+  return messagesSentLocal
 }
 
 interface ExecuteArgs {
@@ -256,9 +282,14 @@ interface ExecuteArgs {
   startPosition: number
   logId: string | null
   triggerEvent: string
+  /** Out-parameter: bumped by 1 per successful WhatsApp send inside
+   *  runStep. Used by executeAutomation to report back to the
+   *  webhook whether the automation actually replied to the customer
+   *  — if so, the webhook suppresses the AI auto-reply. */
+  messagesSent: number
 }
 
-async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
+async function executeStepsFrom(args: ExecuteArgs): Promise<number> {
   const db = supabaseAdmin()
 
   const baseQuery = db
@@ -277,13 +308,13 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
 
   if (stepsErr) {
     await finalizeLog(args.logId, 'failed', stepsErr.message)
-    return
+    return args.messagesSent
   }
   if (!steps || steps.length === 0) {
     if (args.parentStepId === null && args.logId) {
       await finalizeLog(args.logId, 'success', null)
     }
-    return
+    return args.messagesSent
   }
 
   const results: AutomationLogStepResult[] = []
@@ -318,7 +349,7 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
       })
       status = 'partial'
       await appendResults(args.logId, results, status, errorMessage)
-      return
+      return args.messagesSent
     }
 
     try {
@@ -340,6 +371,8 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
           startPosition: 0,
           logId: args.logId,
         })
+        // nested branch messages count toward the parent total via
+        // args.messagesSent, which executeStepsFrom returns.
         continue
       }
 
@@ -372,6 +405,11 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
     // Nested branch — just append results; parent scope decides final status.
     await appendResults(args.logId, results, null, errorMessage)
   }
+
+  // runStep bumps `args.messagesSent` in place; bubble the final
+  // count up to executeAutomation so the webhook knows whether to
+  // suppress the AI auto-reply.
+  return args.messagesSent
 }
 
 async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string> {
@@ -392,6 +430,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         contactId: args.contactId,
         text,
       })
+      args.messagesSent++
       return `sent via Meta (${whatsapp_message_id})`
     }
 
@@ -412,6 +451,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         contactId: args.contactId,
         payload,
       })
+      args.messagesSent++
       return `interactive sent via Meta (${whatsapp_message_id})`
     }
 
@@ -447,6 +487,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         language: cfg.language,
         params,
       })
+      args.messagesSent++
       return `template sent via Meta (${whatsapp_message_id})`
     }
 
@@ -752,6 +793,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         contactId: args.contactId,
         text: trimmed,
       })
+      args.messagesSent++
       return `LLM draft → sent (${whatsapp_message_id})`
     }
 
@@ -879,6 +921,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
           imageUrl,
           caption,
         })
+        args.messagesSent++
         sent.push(whatsapp_message_id)
       }
       return `send_images: sent ${sent.length} image${sent.length === 1 ? '' : 's'} (cap=${limit})`

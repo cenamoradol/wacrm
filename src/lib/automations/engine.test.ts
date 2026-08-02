@@ -1266,3 +1266,69 @@ describe("send_images step", () => {
     }))
   })
 })
+
+// ============================================================
+// runAutomationsForTrigger return value: messagesSent counter
+// lets the webhook suppress the AI auto-reply when an automation
+// already replied to the customer.
+// ============================================================
+describe("runAutomationsForTrigger — messagesSent counter", () => {
+  it("returns 0 when no automations match", async () => {
+    h.state.automations = [] // none match
+    const result = await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: { message_text: "hi" },
+    })
+    expect(result.messagesSent).toBe(0)
+  })
+
+  it("counts every successful WhatsApp send across steps", async () => {
+    // 5 image sends in the same step
+    vi.mocked(engineSendImage).mockReset()
+    for (let i = 0; i < 5; i++) {
+      vi.mocked(engineSendImage).mockResolvedValueOnce({ whatsapp_message_id: `m${i}` })
+    }
+    h.state.owned = { id: "c1" }
+    h.state.automations = [{
+      id: "a1",
+      account_id: ACCOUNT,
+      user_id: "u1",
+      name: "five images",
+      trigger_type: "new_message_received",
+      trigger_config: {},
+      is_active: true,
+    }]
+    h.state.steps = [{
+      id: "s1",
+      automation_id: "a1",
+      step_type: "send_images",
+      position: 0,
+      parent_step_id: null,
+      step_config: {
+        image_path: "vars.list[*].url",
+        max_images: 10,
+      },
+    }]
+    const result = await runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: "new_message_received",
+      contactId: "c1",
+      context: {
+        message_text: "send all",
+        conversation_id: "conv-1",
+        vars: {
+          list: [
+            { url: "https://a.test/1.jpg" },
+            { url: "https://a.test/2.jpg" },
+            { url: "https://a.test/3.jpg" },
+            { url: "https://a.test/4.jpg" },
+            { url: "https://a.test/5.jpg" },
+          ],
+        },
+      },
+    })
+    expect(result.messagesSent).toBe(5)
+  })
+})

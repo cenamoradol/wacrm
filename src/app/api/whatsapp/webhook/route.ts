@@ -822,8 +822,14 @@ async function processMessage(
   // logging zero steps. `runAutomationsForTrigger` owns its own try/catch
   // and never throws; the `.catch` is belt-and-braces so one trigger
   // type's failure can't skip the rest of the loop.
+  // Track total messages sent by any matching automation across all
+  // trigger types. If ≥1, the AI auto-reply below is suppressed —
+  // the automation already replied, and a second LLM-generated answer
+  // would just duplicate the content (image+text noise). The webhook
+  // still goes through to user-defined webhooks.
+  let automationMessagesSent = 0
   for (const triggerType of automationTriggers) {
-    await runAutomationsForTrigger({
+    const result = await runAutomationsForTrigger({
       accountId,
       triggerType,
       contactId: contactRecord.id,
@@ -834,21 +840,34 @@ async function processMessage(
         // trigger's exact-id match.
         interactive_reply_id: interactiveReplyId ?? undefined,
       },
-    }).catch((err) => console.error('[automations] dispatch failed:', err))
+    }).catch((err) => {
+      console.error('[automations] dispatch failed:', err)
+      return { messagesSent: 0 }
+    })
+    automationMessagesSent += result.messagesSent
   }
 
   // AI auto-reply. Runs only for plain-text inbound the deterministic
-  // flow runner did NOT consume (flows win over the LLM), and only when
-  // the account has enabled it. Awaited inside `after()` (same reason as
-  // the webhook dispatch below); `dispatchInboundToAiReply` owns its
-  // eligibility gates + try/catch and never throws.
-  if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
+  // flow runner did NOT consume (flows win over the LLM), AND only when
+  // no automation in the dispatch chain already replied to the customer
+  // (otherwise the customer gets the automation's image+text AND a
+  // redundant AI-generated answer).
+  if (
+    !flowConsumed &&
+    !interactiveReplyId &&
+    inboundText.trim() &&
+    automationMessagesSent === 0
+  ) {
     await dispatchInboundToAiReply({
       accountId,
       conversationId: conversation.id,
       contactId: contactRecord.id,
       configOwnerUserId,
     })
+  } else if (automationMessagesSent > 0) {
+    console.log(
+      `[automations] suppressed AI auto-reply: ${automationMessagesSent} automation message(s) already sent`,
+    )
   }
 
   // message.received webhook (public API). Awaited — not fire-and-forget
