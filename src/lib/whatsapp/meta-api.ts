@@ -1054,3 +1054,77 @@ export async function downloadMedia(
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+
+// ============================================================
+// Media Upload (for messages — NOT Resumable Upload, which is
+// template-only)
+// ============================================================
+//
+// Two distinct Meta endpoints look similar but serve different purposes:
+//
+//   - Resumable Upload (POST /{app_id}/uploads/...): returns a
+//     `4:hash:hash:hash` HANDLE used to attach media to TEMPLATES.
+//     These handles are NOT valid in `image: { id }` of a regular
+//     message send — Meta's docs explicitly say the regular /messages
+//     endpoint needs an `id` returned by the /media endpoint below.
+//
+//   - Media Upload (POST /{phone_number_id}/media): returns a numeric
+//     MEDIA_ID like "1234567890". Pass that into
+//     `image: { id: MEDIA_ID }` of POST /{phone_number_id}/messages and
+//     the message sends with the uploaded media.
+//
+// The earlier engineSendImage change mistakenly used Resumable Upload,
+// which is why every WebP-converted image returned
+// "Your request has violated JSON schema constraint 'type' for the JSON
+// field 'image.id'": the handle format was wrong for messages.
+
+export interface UploadMediaArgs {
+  phoneNumberId: string
+  accessToken: string
+  /** Raw media bytes (already in a Meta-accepted format — JPEG/PNG/etc.). */
+  bytes: Uint8Array
+  /** MIME type matching the bytes. Meta only accepts a small set per kind. */
+  mimeType: 'image/jpeg' | 'image/png' | 'video/mp4' | 'application/pdf'
+}
+
+/**
+ * Upload a media file for use as an `image` / `video` / `document`
+ * in a regular WhatsApp message. Returns the `mediaId` you can pass
+ * into the messages endpoint as `{ type, image: { id: mediaId } }`.
+ */
+export async function uploadMedia(
+  args: UploadMediaArgs,
+): Promise<{ mediaId: string }> {
+  const { phoneNumberId, accessToken, bytes, mimeType } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/media`
+
+  // Meta's docs (and behavior) require the multipart/form-data form:
+  //   - file: <raw bytes>
+  //   - type: <mime>
+  //   - messaging_product: "whatsapp"
+  // Fetch's FormData + Blob handles the multipart construction.
+  const form = new FormData()
+  form.append(
+    'file',
+    new Blob([new Uint8Array(bytes)], { type: mimeType }),
+    mimeType === 'image/jpeg' ? 'image.jpg' : 'file',
+  )
+  form.append('type', mimeType)
+  form.append('messaging_product', 'whatsapp')
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      // Note: NO Content-Type header — let fetch set the
+      // multipart/form-data; boundary=... automatically.
+    },
+    body: form,
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta media upload failed: ${response.status}`)
+  }
+  const data = (await response.json()) as { id?: string }
+  if (!data.id) throw new Error('Media upload did not return an id.')
+  return { mediaId: data.id }
+}

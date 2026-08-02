@@ -2,7 +2,7 @@ import {
   sendTextMessage,
   sendTemplateMessage,
   sendMediaMessage,
-  uploadResumableMedia,
+  uploadMedia,
 } from '@/lib/whatsapp/meta-api'
 import { isDeliverableUrl } from '@/lib/webhooks/ssrf'
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive'
@@ -162,12 +162,9 @@ export async function engineSendImage(
   const ct = (responseForProbe?.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
   if (ct && !ALLOWED.has(ct)) {
     // Not JPEG/PNG — try to convert. Sharp accepts JPEG/PNG/WebP/GIF.
-    const appId = process.env.META_APP_ID
-    if (!appId) {
-      throw new Error(
-        `engineSendImage: image is ${ct || 'unknown format'} but Meta only accepts JPEG/PNG. Set META_APP_ID in the environment so we can Resumable-Upload a converted JPEG.`,
-      )
-    }
+    // The Media Upload endpoint needs only the access_token +
+    // phone_number_id from the existing whatsapp_config — no META_APP_ID
+    // required (that's only for Resumable Upload, which is template-only).
     try {
       const sharp = (await import('sharp')).default
       // Full GET — sharp needs the bytes, HEAD just gave us the type.
@@ -184,17 +181,19 @@ export async function engineSendImage(
         // (the platform re-encodes anyway).
         .jpeg({ quality: 85 })
         .toBuffer()
-      const { handle } = await uploadResumableMedia({
-        appId,
+      // Media Upload (NOT Resumable Upload — that's template-only and
+      // returns a handle format that messages reject as
+      // "violated JSON schema constraint 'type' for image.id").
+      const { mediaId } = await uploadMedia({
+        phoneNumberId: config.phone_number_id,
         accessToken,
-        fileName: 'image.jpg',
-        mimeType: 'image/jpeg',
         bytes: jpegBuf,
+        mimeType: 'image/jpeg',
       })
-      mediaHandle = handle
+      mediaHandle = mediaId
       useOriginalLink = false
       console.log(
-        `[automations] engineSendImage converted ${ct} → image/jpeg (${jpegBuf.byteLength} bytes), handle=${handle}`,
+        `[automations] engineSendImage converted ${ct} → image/jpeg (${jpegBuf.byteLength} bytes), media_id=${mediaId}`,
       )
     } catch (err) {
       console.warn(
