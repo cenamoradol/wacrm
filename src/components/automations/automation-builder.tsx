@@ -1056,6 +1056,10 @@ type StepPath = (
 interface StepListProps {
   steps: BuilderStep[]
   parentPath: StepPath
+  /** Optional override for the parent scope — used by ConditionBranches
+   *  so the path stays clean (one branch marker, not two). When omitted,
+   *  parentScope is derived from `parentPath[length-1]`. */
+  parentScope?: ParentScope
   expandedId: string | null
   setExpandedId: (id: string | null) => void
   updateStep: (path: StepPath, updater: (s: BuilderStep) => BuilderStep) => void
@@ -1065,15 +1069,18 @@ interface StepListProps {
 }
 
 function StepList(props: StepListProps) {
-  const { steps, parentPath, ...rest } = props
+  const { steps, parentPath, parentScope: parentScopeOverride, ...rest } = props
+  // Caller-supplied scope wins (ConditionBranches uses this to avoid
+  // double-stamping the path); otherwise derive from the path tail.
   const parentScope: ParentScope =
-    parentPath.length === 0
+    parentScopeOverride ??
+    (parentPath.length === 0
       ? { kind: "root" }
       : (() => {
           const last = parentPath[parentPath.length - 1]
           if (last.kind !== "branch") return { kind: "root" } as const
           return { kind: "branch", parentCid: last.parentCid, branch: last.branch } as const
-        })()
+        })())
 
   return (
     <div className="flex flex-col items-center">
@@ -1222,27 +1229,24 @@ function ConditionBranches({
   const t = useTranslations("Automations.builder")
   const yes = step.branches?.yes ?? []
   const no = step.branches?.no ?? []
-  // Build the child scope by appending a branch marker. The scope the
-  // StepList uses is driven by the LAST element of parentPath, so the
-  // tail's `index` doesn't matter — it's replaced per child during walks.
-  const yesPath: StepPath = [
-    ...parentPath,
-    { kind: "branch", parentCid: step.cid, branch: "yes", index: 0 },
-  ]
-  const noPath: StepPath = [
-    ...parentPath,
-    { kind: "branch", parentCid: step.cid, branch: "no", index: 0 },
-  ]
+  // Pass parentScope as a prop instead of stuffing a placeholder branch
+  // marker into parentPath — the previous approach yielded paths with two
+  // consecutive branch markers, which made `mapAtPath` recurse into the
+  // child step's `branches` (undefined for non-condition steps) and
+  // silently drop the update, leaving inputs in the Yes/No branches
+  // read-only from the user's POV.
+  const yesScope: ParentScope = { kind: "branch", parentCid: step.cid, branch: "yes" }
+  const noScope: ParentScope = { kind: "branch", parentCid: step.cid, branch: "no" }
   return (
     // Stack Yes/No vertically on mobile — two columns at 375px would
     // cram each branch to ~170px which is too narrow for the nested
     // cards. Two-column grid returns on sm+.
     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
       <BranchColumn label={t("branches.yes")} color="text-primary">
-        <StepList {...props} steps={yes} parentPath={yesPath} />
+        <StepList {...props} steps={yes} parentPath={parentPath} parentScope={yesScope} />
       </BranchColumn>
       <BranchColumn label={t("branches.no")} color="text-rose-400">
-        <StepList {...props} steps={no} parentPath={noPath} />
+        <StepList {...props} steps={no} parentPath={parentPath} parentScope={noScope} />
       </BranchColumn>
     </div>
   )
