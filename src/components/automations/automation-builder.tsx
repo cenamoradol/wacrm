@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react"
@@ -65,6 +66,11 @@ import {
 import { interactivePayloadPreviewText } from "@/lib/whatsapp/interactive"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import {
+  validateStepsForActivation,
+  validateTriggerForActivation,
+  type ValidationIssue,
+} from "@/lib/automations/validate"
 
 // ------------------------------------------------------------
 // Types (builder-local — mirror the flattened rows we POST)
@@ -638,6 +644,10 @@ function SendTemplateFields({
 // Main builder component
 // ------------------------------------------------------------
 
+function nonEmptyString(v: unknown): boolean {
+  return typeof v === "string" && v.trim().length > 0
+}
+
 export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   const router = useRouter()
   const t = useTranslations("Automations.builder")
@@ -645,6 +655,25 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   const [state, setState] = useState<BuilderInitial>(initial)
   const [saving, setSaving] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  // Mirror the server's activation gate (validate.ts) on the client so
+  // the Save button is disabled while there are fixable issues and the
+  // user sees a hint instead of an opaque 400 toast on click.
+  // Inactive drafts are allowed to have issues — they're not blocked.
+  // ponytail: same gate as src/app/api/automations/[id]/route.ts — keep in sync if you add new validation rules.
+  const activationIssues = useMemo<ValidationIssue[]>(() => {
+    if (!state.is_active) return []
+    return [
+      ...validateTriggerForActivation(state.trigger_type, state.trigger_config),
+      ...validateStepsForActivation(state.steps as never),
+    ]
+  }, [
+    state.is_active,
+    state.trigger_type,
+    state.trigger_config,
+    state.steps,
+  ])
+  const activationBlocked = state.is_active && activationIssues.length > 0
 
   function patchTop<K extends keyof BuilderInitial>(key: K, value: BuilderInitial[K]) {
     setState((s) => ({ ...s, [key]: value }))
@@ -754,12 +783,19 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         </div>
         <Button
           onClick={save}
-          disabled={saving}
+          disabled={saving || activationBlocked}
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {isEditing ? t("save") : t("saveDraft")}
         </Button>
+        {activationBlocked && (
+          <span className="hidden text-xs font-medium text-destructive sm:inline">
+            {activationIssues.length === 1
+              ? "1 issue to fix"
+              : `${activationIssues.length} issues to fix`}
+          </span>
+        )}
       </header>
 
       {/* Canvas */}
@@ -1083,7 +1119,12 @@ function StepList(props: StepListProps) {
         })())
 
   return (
-    <div className="flex flex-col items-center">
+    // `w-full min-w-0` is required when this list is rendered inside a
+    // narrower container (e.g. a YES/NO branch column ~194px wide):
+    // without it, the list expands to fit its content's intrinsic width
+    // and child cards with `w-full` end up wider than the column,
+    // overflowing horizontally and colliding with sibling branches.
+    <div className="flex w-full min-w-0 flex-col items-center">
       <AddButton onPick={(t) => props.addStepAt(parentScope, 0, t)} />
       {steps.map((step, idx) => (
         <StepRenderer
@@ -1125,10 +1166,15 @@ function StepRenderer({
   const Icon = meta.icon
   const expanded = props.expandedId === step.cid
   const isCondition = step.step_type === "condition"
-  // Card widths on mobile fill the full canvas column (max-w-2xl px-4
-  // still keeps them reasonable). On sm+ the original fixed widths
-  // come back so the flow visual stays recognisable.
-  const width = isCondition
+  // A step nested inside a YES/NO branch lives in a grid cell that's
+  // ~half the canvas width — fixed 320px cards overflow horizontally
+  // and visually collide with the sibling branch's card. Stretch to
+  // the column width in that case; keep the larger fixed widths for
+  // the main flow so it stays recognisable.
+  const inBranch = parentScope.kind === "branch"
+  const width = inBranch
+    ? "w-full"
+    : isCondition
     ? "w-full max-w-[400px] sm:w-[400px]"
     : "w-full max-w-[320px] sm:w-80"
 
@@ -1262,7 +1308,10 @@ function BranchColumn({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center">
+    // `min-w-0` lets the grid cell shrink below its content's intrinsic
+    // min-width — without it, a 320px child forces the column wider than
+    // its (canvas/2) allocation and the sibling branch's card collides.
+    <div className="flex min-w-0 flex-col items-center">
       <div className={cn("mb-2 text-[11px] font-semibold uppercase", color)}>{label}</div>
       {children}
     </div>
@@ -1502,8 +1551,20 @@ function StepEditor({
               placeholder={operandPlaceholder}
               value={(cfg.operand as string) ?? ""}
               onChange={(e) => set({ operand: e.target.value })}
-              className="bg-muted text-foreground"
+              className={cn(
+                "bg-muted text-foreground",
+                !nonEmptyString(cfg.operand) &&
+                  "border-destructive focus-visible:ring-destructive"
+              )}
+              aria-invalid={!nonEmptyString(cfg.operand)}
             />
+            {!nonEmptyString(cfg.operand) && (
+              <p className="mt-1 text-xs text-destructive">
+                {t("config.operandRequired", {
+                  defaultValue: "Required to save an active automation",
+                })}
+              </p>
+            )}
           </FieldBlock>
           {subject === "vars_value" && (
             <>
@@ -1635,7 +1696,7 @@ function StepEditor({
               <p className="mt-1 text-[11px] text-muted-foreground">
                 {t("config.queryParamsHint", {
                   defaultValue:
-                    "Each value supports {{ vars.foo }} placeholders. Params whose value interpolates to empty are dropped from the URL entirely (no ?key= sent).",
+                    "Each value supports '{{ vars.foo }}' placeholders. Params whose value interpolates to empty are dropped from the URL entirely (no ?key= sent).",
                 })}
               </p>
             </FieldBlock>
@@ -1825,7 +1886,7 @@ function StepEditor({
             <p className="mt-1 text-[11px] text-muted-foreground">
               {t("config.imageCaptionHint", {
                 defaultValue:
-                  "Caption rendered under each image (same bubble). Use {{ loop.index }} for the 1-based iteration position and {{ loop.<field> }} for fields of the current array item. Example: {{ loop.index }}. {{ loop.title }} — ${{ loop.price }}",
+                  "Caption rendered under each image (same bubble). Use '{{ loop.index }}' for the 1-based iteration position and '{{ loop.<field> }}' for fields of the current array item. Example: '{{ loop.index }}. {{ loop.title }}' — ${{ loop.price }}",
               })}
             </p>
           </FieldBlock>
