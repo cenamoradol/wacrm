@@ -1269,6 +1269,24 @@
       "yourAccount": "Your account",
       "loading": "Loading…"
     },
+    "notifications": {
+      "title": "Browser notifications",
+      "description": "Get a native push notification when a teammate assigns you a conversation — even with the CRM tab closed.",
+      "enable": "Enable browser notifications",
+      "disable": "Disable browser notifications",
+      "enabled": "Notifications are on. You'll get a native push when a conversation is assigned to you.",
+      "ready": "Click \"Enable browser notifications\" to subscribe this device.",
+      "blocked": "Notifications are blocked at the browser level. Allow them in the address bar (the lock icon) and refresh this page.",
+      "unsupported": "This browser doesn't support push notifications.",
+      "insecureOrigin": "Web push requires HTTPS — only works on secure origins.",
+      "disabledByAdmin": "The workspace owner hasn't configured browser push yet. Generate a VAPID key pair and set NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY.",
+      "subscribeError": "Couldn't request notification permission. Try again, or check the browser's site settings.",
+      "triggerListTitle": "What you'll be notified about",
+      "triggerAssigned": "Conversation assigned to you",
+      "triggerAssignedDesc": "Any time a teammate (or an automation) assigns a conversation to you.",
+      "inAppTitle": "In-app inbox",
+      "inAppDesc": "All notifications also appear in the bell icon in the sidebar — same feed, just less urgent than push."
+    },
     "members": {
       "title": "Team members",
       "description": "People with access to this account. Roles control what each teammate can do.",
@@ -1555,6 +1573,7 @@
       "quick-replies": "Quick replies",
       "fields": "Fields & tags",
       "deals": "Deals & currency",
+      "notifications": "Notifications",
       "members": "Team members",
       "api": "API keys"
     },

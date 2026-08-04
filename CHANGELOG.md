@@ -9,6 +9,52 @@ Versions follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0, `MINOR` bumps cover new modules; `PATCH` bumps cover bug fixes
 and polish.
 
+## [Unreleased]
+
+Adds optional **browser push notifications** (OneSignal Web Push) on
+top of the existing in-app feed. The in-app bell badge keeps working
+exactly as before — push is opt-in per device, opt-out is one click in
+**Settings → Notifications**.
+
+> **Migration required:** apply `supabase/migrations/039_onesignal_push.sql`
+> (enables the `pg_net` extension and adds the OneSignal dispatch trigger).
+> See `docs/push-notifications.md` for the full setup, including the
+> `ALTER DATABASE … SET app.onesignal_*` steps that store the credentials
+> the trigger reads at dispatch time.
+
+### Added
+
+- **OneSignal Web Push integration.** When a conversation is assigned,
+  the assigned teammate gets a native browser push on every device
+  they're signed in on — even with the CRM tab closed. `OneSignal.login(user.id)`
+  pairs each subscription with the signed-in Supabase user; sign-out
+  calls `logout()` so the next person on that device doesn't inherit
+  the previous user's pushes.
+- **PWA manifest + apple-touch-icon.** `public/manifest.json` and a
+  dedicated 180×180 apple-icon route. Required for web push on iOS
+  16.4+ (Safari forces the user to "Add to Home Screen" before
+  subscribing). The existing `/icon` route doubles as the PWA icon.
+- **Settings → Notifications panel.** Toggle button that drives the
+  browser's native permission prompt and surfaces the current
+  subscription state. When `NEXT_PUBLIC_ONESIGNAL_APP_ID` is unset
+  (self-hosted install without web push), the panel explains the
+  missing config and disables the toggle.
+- **CSP allow-list for OneSignal domains.** `cdn.onesignal.com` /
+  `api.onesignal.com` / `*.onesignal.com` are added to `script-src` /
+  `connect-src` so the SDK and its telemetry endpoints can load.
+
+### Notes for operators
+
+- The trigger reads credentials from Postgres GUC settings
+  (`app.onesignal_app_id`, `app.onesignal_api_key`), not from env vars.
+  Rotating the key is a one-line `ALTER DATABASE` — no migration.
+- Web push **requires HTTPS** in production. `localhost` /
+  `127.0.0.1` work for dev because browsers treat them as secure
+  origins.
+- A failed push is silently logged (`RAISE WARNING`) and never blocks
+  the in-app notification, so a OneSignal outage can't take down
+  assignment.
+
 ## [0.8.1] — 2026-07-10
 
 Fixes inbound chats fragmenting into multiple threads for the same

@@ -1269,6 +1269,24 @@
       "yourAccount": "내 계정",
       "loading": "불러오는 중…"
     },
+    "notifications": {
+      "title": "브라우저 알림",
+      "description": "동료가 대화를 나에게 할당할 때 CRM 탭이 닫혀 있어도 네이티브 푸시 알림을 받습니다.",
+      "enable": "브라우저 알림 켜기",
+      "disable": "브라우저 알림 끄기",
+      "enabled": "알림이 켜져 있습니다. 대화가 할당되면 네이티브 푸시를 받습니다.",
+      "ready": "\"브라우저 알림 켜기\"를 눌러 이 기기를 구독하세요.",
+      "blocked": "브라우저 수준에서 알림이 차단되어 있습니다. 주소창의 잠금 아이콘에서 허용한 뒤 페이지를 새로 고침하세요.",
+      "unsupported": "이 브라우저는 푸시 알림을 지원하지 않습니다.",
+      "insecureOrigin": "웹 푸시 알림은 HTTPS가 필요합니다 — 보안 출처에서만 동작합니다.",
+      "disabledByAdmin": "워크스페이스 소유자가 아직 브라우저 푸시를 설정하지 않았습니다. VAPID 키 쌍을 생성하고 NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY를 설정하세요.",
+      "subscribeError": "알림 권한을 요청할 수 없습니다. 다시 시도하거나 브라우저 사이트 설정을 확인하세요.",
+      "triggerListTitle": "알림 받을 항목",
+      "triggerAssigned": "나에게 할당된 대화",
+      "triggerAssignedDesc": "동료(또는 자동화)가 대화를 나에게 할당할 때마다.",
+      "inAppTitle": "인앱 받은편지함",
+      "inAppDesc": "모든 알림은 사이드바의 종 아이콘에도 표시됩니다 — 푸시보다 덜 긴급한 동일한 피드입니다."
+    },
     "members": {
       "title": "팀원",
       "description": "이 계정에 접근 권한이 있는 사람들입니다. 역할에 따라 각 팀원이 할 수 있는 작업이 결정됩니다.",
@@ -1545,16 +1563,17 @@
       "step4_5": "\"messages\" 웹훅 필드를 구독",
       "metaDocs": "Meta WhatsApp API 문서"
     },
-    "sections": {
+"sections": {
       "overview": "개요",
       "profile": "내 프로필",
       "security": "로그인 & 보안",
-      "appearance": "화면 설정",
+      "appearance": "외观",
       "whatsapp": "WhatsApp",
       "templates": "템플릿",
-      "quick-replies": "빠른 답장",
+      "quick-replies": "빠른 응답",
       "fields": "필드 & 태그",
-      "deals": "딜 & 통화",
+      "deals": "거래 & 통화",
+      "notifications": "알림",
       "members": "팀원",
       "api": "API 키"
     },

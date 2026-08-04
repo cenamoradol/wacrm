@@ -56,6 +56,10 @@ const SECURITY_HEADERS = [
       // Supabase REST + realtime (WSS). All Meta API calls happen
       // server-side, so graph.facebook.com does not belong here.
       "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+      // The push service worker (public/sw.js) is registered at the
+      // root scope. Same-origin workers + the blob: scheme (for
+      // browser-generated inline workers during install).
+      "worker-src 'self' blob:",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
