@@ -2,8 +2,10 @@
 
 /**
  * NotificationsPanel — toggle for the W3C Web Push subscription.
- * Renders a "not configured" notice when the server doesn't have
- * VAPID keys (NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY).
+ * "Not configured" is detected via `useWebPush().status === "disabled"`,
+ * which is set by the bootstrap when /api/push/vapid-key returns
+ * `{ publicKey: null }` (i.e. server is missing NEXT_PUBLIC_VAPID_PUBLIC_KEY
+ * or VAPID_PRIVATE_KEY at runtime — no build-time inlining needed).
  *
  * The in-app notification feed (the bell badge in the sidebar) is
  * always on and isn't surfaced here — this panel is strictly about
@@ -17,8 +19,6 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useWebPush } from "@/components/notifications/webpush-bootstrap";
-
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "";
 
 export function NotificationsPanel() {
   const t = useTranslations("Settings.notifications");
@@ -34,7 +34,12 @@ export function NotificationsPanel() {
   // real state catches up on mount.
   useEffect(() => setMounted(true), []);
 
-  const configMissing = !VAPID_PUBLIC_KEY;
+  // Source of truth for "is VAPID configured": the bootstrap hook.
+  // It fetches /api/push/vapid-key in runtime, so we don't depend on
+  // NEXT_PUBLIC_VAPID_PUBLIC_KEY being inlined into the client bundle
+  // at build time (which was the old, fragile path — adding the var
+  // in Railway after a deploy required a full rebuild to take effect).
+  const configMissing = mounted && status === "disabled";
   const reasonMessage = (() => {
     if (!mounted) return null;
     if (configMissing) return t("disabledByAdmin");
