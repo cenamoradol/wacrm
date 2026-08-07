@@ -1,6 +1,6 @@
-import "server-only";
+import 'server-only';
 
-import webpush from "web-push";
+import webpush from 'web-push';
 
 /**
  * VAPID + web-push configuration.
@@ -33,10 +33,9 @@ export function configureWebPush(): boolean {
 
   initialized = true;
 
-  const publicKey = getEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY");
-  const privateKey = getEnv("VAPID_PRIVATE_KEY");
-  const subject =
-    getEnv("VAPID_SUBJECT") ?? "mailto:support@wacrm.example.com";
+  const publicKey = getEnv('NEXT_PUBLIC_VAPID_PUBLIC_KEY');
+  const privateKey = getEnv('VAPID_PRIVATE_KEY');
+  const subject = getEnv('VAPID_SUBJECT') ?? 'mailto:support@wacrm.example.com';
 
   if (!publicKey || !privateKey) {
     hasKeys = false;
@@ -47,13 +46,15 @@ export function configureWebPush(): boolean {
     webpush.setVapidDetails(subject, publicKey, privateKey);
     hasKeys = true;
   } catch (e) {
-    console.warn("[vapid] setVapidDetails failed:", e);
+    console.warn('[vapid] setVapidDetails failed:', e);
     hasKeys = false;
   }
   return hasKeys;
 }
 
 export function isWebPushConfigured(): boolean {
-  return getEnv("NEXT_PUBLIC_VAPID_PUBLIC_KEY") !== null &&
-    getEnv("VAPID_PRIVATE_KEY") !== null;
+  return (
+    getEnv('NEXT_PUBLIC_VAPID_PUBLIC_KEY') !== null &&
+    getEnv('VAPID_PRIVATE_KEY') !== null
+  );
 }

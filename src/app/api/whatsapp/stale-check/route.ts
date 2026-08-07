@@ -1,6 +1,6 @@
-import { timingSafeEqual } from 'node:crypto'
-import { NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/automations/admin-client'
+import { timingSafeEqual } from 'node:crypto';
+import { NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/automations/admin-client';
 
 /**
  * Stale-delivery detector for bot-sent messages.
@@ -28,30 +28,32 @@ import { supabaseAdmin } from '@/lib/automations/admin-client'
  * (Meta never called us back) and whose created_at is older than the
  * cutoff. Runs once and returns the count.
  */
-const DEFAULT_TIMEOUT_MINUTES = 10
+const DEFAULT_TIMEOUT_MINUTES = 10;
 
 export async function GET(request: Request) {
-  const expected = process.env.AUTOMATION_CRON_SECRET
+  const expected = process.env.AUTOMATION_CRON_SECRET;
   if (!expected) {
-    return NextResponse.json({ error: 'cron not configured' }, { status: 503 })
+    return NextResponse.json({ error: 'cron not configured' }, { status: 503 });
   }
-  const supplied = request.headers.get('x-cron-secret') ?? ''
-  const suppliedBuf = Buffer.from(supplied)
-  const expectedBuf = Buffer.from(expected)
+  const supplied = request.headers.get('x-cron-secret') ?? '';
+  const suppliedBuf = Buffer.from(supplied);
+  const expectedBuf = Buffer.from(expected);
   if (
     suppliedBuf.length !== expectedBuf.length ||
     !timingSafeEqual(suppliedBuf, expectedBuf)
   ) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   // Optional override via ?timeout= for tests / faster debugging.
-  const url = new URL(request.url)
-  const timeoutRaw = Number(url.searchParams.get('timeout'))
+  const url = new URL(request.url);
+  const timeoutRaw = Number(url.searchParams.get('timeout'));
   const timeoutMinutes =
-    Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : DEFAULT_TIMEOUT_MINUTES
+    Number.isFinite(timeoutRaw) && timeoutRaw > 0
+      ? timeoutRaw
+      : DEFAULT_TIMEOUT_MINUTES;
 
-  const cutoff = new Date(Date.now() - timeoutMinutes * 60_000).toISOString()
+  const cutoff = new Date(Date.now() - timeoutMinutes * 60_000).toISOString();
 
   // Find bot-sent messages that Meta never confirmed delivery for.
   // sender_type='bot' covers every automation / flow / AI reply that
@@ -66,20 +68,20 @@ export async function GET(request: Request) {
     .eq('sender_type', 'bot')
     .is('meta_status_updated_at', null)
     .lt('created_at', cutoff)
-    .limit(200)
+    .limit(200);
 
   if (fetchErr) {
-    return NextResponse.json({ error: fetchErr.message }, { status: 500 })
+    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
   }
   if (!stale || stale.length === 0) {
     return NextResponse.json({
       scanned: 0,
       flipped: 0,
       timeout_minutes: timeoutMinutes,
-    })
+    });
   }
 
-  const ids = stale.map((r) => r.id as string)
+  const ids = stale.map((r) => r.id as string);
   const { error: updateErr, count } = await supabaseAdmin()
     .from('messages')
     .update({
@@ -87,19 +89,19 @@ export async function GET(request: Request) {
       meta_last_error: `No delivery confirmation from Meta after ${timeoutMinutes} minutes — webhook status callback never fired. Check Meta webhook config or quality rating.`,
       meta_status_updated_at: new Date().toISOString(),
     })
-    .in('id', ids)
+    .in('id', ids);
 
   if (updateErr) {
-    return NextResponse.json({ error: updateErr.message }, { status: 500 })
+    return NextResponse.json({ error: updateErr.message }, { status: 500 });
   }
 
   console.warn(
-    `[whatsapp-stale-check] flipped ${count ?? ids.length} bot messages from 'sent' to 'failed' (older than ${timeoutMinutes}min, no webhook callback)`,
-  )
+    `[whatsapp-stale-check] flipped ${count ?? ids.length} bot messages from 'sent' to 'failed' (older than ${timeoutMinutes}min, no webhook callback)`
+  );
 
   return NextResponse.json({
     scanned: stale.length,
     flipped: count ?? ids.length,
     timeout_minutes: timeoutMinutes,
-  })
+  });
 }

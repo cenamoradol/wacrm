@@ -1,4 +1,4 @@
-declare module "web-push" {
+declare module 'web-push' {
   // The web-push npm package on npm (v3.6.x) still uses the
   // function-based API, even though its TypeScript types
   // (@types/web-push) cover a v3.5 era. The v3.6 README hints at a
@@ -47,7 +47,7 @@ declare module "web-push" {
   export function setVapidDetails(
     subject: string,
     publicKey: string,
-    privateKey: string,
+    privateKey: string
   ): void;
 
   export function generateVAPIDKeys(): VapidKeys;
@@ -55,7 +55,7 @@ declare module "web-push" {
   export function sendNotification(
     sub: PushSubscriptionLike,
     payload?: string | null,
-    options?: RequestOptions,
+    options?: RequestOptions
   ): Promise<SendResult>;
 
   const _default: {

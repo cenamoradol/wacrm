@@ -28,11 +28,18 @@ function payload(over: Partial<TemplatePayload> = {}): TemplatePayload {
   };
 }
 
-function imgResponse(type = 'image/jpeg', size = 1024, ok = true, status = 200): Response {
+function imgResponse(
+  type = 'image/jpeg',
+  size = 1024,
+  ok = true,
+  status = 200
+): Response {
   return {
     ok,
     status,
-    headers: { get: (h: string) => (h.toLowerCase() === 'content-type' ? type : null) },
+    headers: {
+      get: (h: string) => (h.toLowerCase() === 'content-type' ? type : null),
+    },
     arrayBuffer: async () => new ArrayBuffer(size),
   } as unknown as Response;
 }
@@ -64,12 +71,17 @@ describe('ensureImageHeaderHandle', () => {
 
   it('throws an actionable error when META_APP_ID is unset', async () => {
     const p = payload();
-    await expect(ensureImageHeaderHandle(p, 'tok')).rejects.toThrow(/META_APP_ID/);
+    await expect(ensureImageHeaderHandle(p, 'tok')).rejects.toThrow(
+      /META_APP_ID/
+    );
   });
 
   it('derives + sets header_handle from a valid image URL', async () => {
     vi.stubEnv('META_APP_ID', 'app-1');
-    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('image/jpeg', 2048)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => imgResponse('image/jpeg', 2048))
+    );
     const p = payload();
     await ensureImageHeaderHandle(p, 'tok');
     expect(uploadResumableMedia).toHaveBeenCalledOnce();
@@ -78,14 +90,24 @@ describe('ensureImageHeaderHandle', () => {
 
   it('rejects a non-image content type', async () => {
     vi.stubEnv('META_APP_ID', 'app-1');
-    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('text/html')));
-    await expect(ensureImageHeaderHandle(payload(), 'tok')).rejects.toThrow(/JPEG or PNG/);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => imgResponse('text/html'))
+    );
+    await expect(ensureImageHeaderHandle(payload(), 'tok')).rejects.toThrow(
+      /JPEG or PNG/
+    );
   });
 
   it('rejects an image over 5 MB', async () => {
     vi.stubEnv('META_APP_ID', 'app-1');
-    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('image/png', 6 * 1024 * 1024)));
-    await expect(ensureImageHeaderHandle(payload(), 'tok')).rejects.toThrow(/5 MB/);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => imgResponse('image/png', 6 * 1024 * 1024))
+    );
+    await expect(ensureImageHeaderHandle(payload(), 'tok')).rejects.toThrow(
+      /5 MB/
+    );
   });
 
   // Regression: `header_media_url` is caller-supplied and any authenticated
@@ -99,10 +121,16 @@ describe('ensureImageHeaderHandle', () => {
     const fetchSpy = vi.fn(async () => imgResponse('application/json'));
     vi.stubGlobal('fetch', fetchSpy);
 
-    const p = payload({ header_media_url: 'http://169.254.169.254/latest/meta-data/' });
-    await expect(ensureImageHeaderHandle(p, 'tok')).rejects.toThrow(/publicly reachable/);
+    const p = payload({
+      header_media_url: 'http://169.254.169.254/latest/meta-data/',
+    });
+    await expect(ensureImageHeaderHandle(p, 'tok')).rejects.toThrow(
+      /publicly reachable/
+    );
 
-    expect(isDeliverableUrl).toHaveBeenCalledWith('http://169.254.169.254/latest/meta-data/');
+    expect(isDeliverableUrl).toHaveBeenCalledWith(
+      'http://169.254.169.254/latest/meta-data/'
+    );
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(uploadResumableMedia).not.toHaveBeenCalled();
     expect(p.header_handle).toBeUndefined();
@@ -112,9 +140,12 @@ describe('ensureImageHeaderHandle', () => {
     vi.stubEnv('META_APP_ID', 'app-1');
 
     vi.mocked(isDeliverableUrl).mockResolvedValue(false);
-    vi.stubGlobal('fetch', vi.fn(async () => imgResponse()));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => imgResponse())
+    );
     const blocked = await ensureImageHeaderHandle(payload(), 'tok').catch(
-      (e: Error) => e.message,
+      (e: Error) => e.message
     );
 
     vi.mocked(isDeliverableUrl).mockResolvedValue(true);
@@ -122,10 +153,10 @@ describe('ensureImageHeaderHandle', () => {
       'fetch',
       vi.fn(async () => {
         throw new Error('ECONNREFUSED');
-      }),
+      })
     );
     const unreachable = await ensureImageHeaderHandle(payload(), 'tok').catch(
-      (e: Error) => e.message,
+      (e: Error) => e.message
     );
 
     expect(blocked).toBe(unreachable);

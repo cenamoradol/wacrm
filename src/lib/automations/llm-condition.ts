@@ -1,7 +1,7 @@
-import { supabaseAdmin } from './admin-client'
-import { loadAiConfig } from '@/lib/ai/config'
-import { generateReply } from '@/lib/ai/generate'
-import { AiError } from '@/lib/ai/types'
+import { supabaseAdmin } from './admin-client';
+import { loadAiConfig } from '@/lib/ai/config';
+import { generateReply } from '@/lib/ai/generate';
+import { AiError } from '@/lib/ai/types';
 
 // ============================================================
 // LLM-evaluated trigger condition.
@@ -23,21 +23,25 @@ import { AiError } from '@/lib/ai/types'
 // ============================================================
 
 export interface EvaluateLlmConditionArgs {
-  accountId: string
+  accountId: string;
   /** Natural-language condition the LLM evaluates. */
-  prompt: string
+  prompt: string;
   /** The customer's most recent text message. */
-  recentMessage: string
+  recentMessage: string;
   /** Optional: short recent conversation to give the LLM context. */
-  conversationSnippet?: string
+  conversationSnippet?: string;
 }
 
 export interface LlmConditionResult {
-  boolean: boolean
+  boolean: boolean;
   /** Optional one-line reasoning the LLM returned after YES/NO. */
-  reasoning?: string
+  reasoning?: string;
   /** Provider-reported usage, propagated to the calling context. */
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  } | null;
 }
 
 /**
@@ -51,15 +55,15 @@ export interface LlmConditionResult {
  * fire, rather than crashing the whole run).
  */
 export async function evaluateLlmCondition(
-  args: EvaluateLlmConditionArgs,
+  args: EvaluateLlmConditionArgs
 ): Promise<LlmConditionResult> {
-  const db = supabaseAdmin()
-  const config = await loadAiConfig(db, args.accountId)
+  const db = supabaseAdmin();
+  const config = await loadAiConfig(db, args.accountId);
   if (!config) {
     throw new AiError(
       'LLM condition trigger requires an active AI configuration. Set one up in Settings → AI Assistant.',
-      { code: 'ai_not_configured', status: 400 },
-    )
+      { code: 'ai_not_configured', status: 400 }
+    );
   }
 
   const userContent =
@@ -68,25 +72,25 @@ export async function evaluateLlmCondition(
       ? `RECENT CONVERSATION:\n${args.conversationSnippet.trim()}\n\n`
       : '') +
     `LATEST CUSTOMER MESSAGE:\n${args.recentMessage.trim()}\n\n` +
-    `Does the customer's message satisfy the condition? Reply YES or NO on the first line, then optionally a brief one-line explanation. Nothing else.`
+    `Does the customer's message satisfy the condition? Reply YES or NO on the first line, then optionally a brief one-line explanation. Nothing else.`;
 
   const { text, usage } = await generateReply({
     config,
     systemPrompt:
       'You are a precise condition evaluator. Read the condition and the customer message(s), then decide if the condition is satisfied. Output exactly one line starting with YES or NO, followed optionally by a single short line of reasoning. No preamble, no labels, no quotes.',
     messages: [{ role: 'user', content: userContent }],
-  })
+  });
 
-  const firstLine = text.trim().split('\n')[0] ?? ''
-  const verdict = firstLine.trim().toUpperCase()
-  const boolean = verdict.startsWith('YES')
+  const firstLine = text.trim().split('\n')[0] ?? '';
+  const verdict = firstLine.trim().toUpperCase();
+  const boolean = verdict.startsWith('YES');
   console.log(
-    `[automations] llm_condition verdict=${boolean ? 'YES' : 'NO'} raw="${text.replace(/\n/g, ' ').slice(0, 120)}" prompt="${args.prompt.slice(0, 80)}" msg="${args.recentMessage.slice(0, 80)}"`,
-  )
+    `[automations] llm_condition verdict=${boolean ? 'YES' : 'NO'} raw="${text.replace(/\n/g, ' ').slice(0, 120)}" prompt="${args.prompt.slice(0, 80)}" msg="${args.recentMessage.slice(0, 80)}"`
+  );
 
   // The reasoning lives on every line after the first; trim it.
-  const rest = text.split('\n').slice(1).join(' ').trim()
-  const reasoning = rest || undefined
+  const rest = text.split('\n').slice(1).join(' ').trim();
+  const reasoning = rest || undefined;
 
-  return { boolean, reasoning, usage }
+  return { boolean, reasoning, usage };
 }

@@ -1,9 +1,9 @@
-import "server-only";
+import 'server-only';
 
-import webpush from "web-push";
-import { createClient as createServerClient } from "@supabase/supabase-js";
-import { configureWebPush } from "./vapid";
-import type { PushSubscriptionRow } from "./types";
+import webpush from 'web-push';
+import { createClient as createServerClient } from '@supabase/supabase-js';
+import { configureWebPush } from './vapid';
+import type { PushSubscriptionRow } from './types';
 
 /**
  * Fan a single notification payload out to every push subscription
@@ -38,7 +38,7 @@ export interface DispatchResult {
 }
 
 export async function dispatchToUser(
-  payload: DispatchPayload,
+  payload: DispatchPayload
 ): Promise<DispatchResult> {
   const result: DispatchResult = {
     total: 0,
@@ -56,19 +56,19 @@ export async function dispatchToUser(
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } },
+    { auth: { persistSession: false } }
   );
 
   // Read the user's subscriptions. RLS would normally limit this to
   // the current user, but the dispatch endpoint runs as service role
   // and the request is for an arbitrary user id.
   const { data: subs, error } = await supabase
-    .from("push_subscriptions")
-    .select("id, endpoint, p256dh, auth")
-    .eq("user_id", payload.user_id);
+    .from('push_subscriptions')
+    .select('id, endpoint, p256dh, auth')
+    .eq('user_id', payload.user_id);
 
   if (error) {
-    console.warn("[push-dispatch] failed to list subscriptions", error);
+    console.warn('[push-dispatch] failed to list subscriptions', error);
     result.failed = 1;
     return result;
   }
@@ -83,8 +83,7 @@ export async function dispatchToUser(
   // Build the W3C push payload. The service worker reads `data` for
   // the click URL and `tag` so a second push to the same
   // notification replaces the first.
-  const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://crm.example.com";
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://crm.example.com';
   const target = payload.conversation_id
     ? `${siteUrl}/inbox?c=${payload.conversation_id}`
     : `${siteUrl}/notifications`;
@@ -92,9 +91,9 @@ export async function dispatchToUser(
   const pushPayload = JSON.stringify({
     notification_id: payload.notification_id,
     title: payload.title,
-    body: payload.body ?? "",
-    icon: "/icon",
-    badge: "/icon",
+    body: payload.body ?? '',
+    icon: '/icon',
+    badge: '/icon',
     url: target,
     tag: payload.notification_id,
   });
@@ -117,42 +116,43 @@ export async function dispatchToUser(
             pushPayload,
             {
               TTL: 60 * 60, // 1h — long enough for the user to re-open
-              headers: { Urgency: "high" },
+              headers: { Urgency: 'high' },
               timeout: PER_SUB_TIMEOUT_MS,
-            },
+            }
           ),
           new Promise<never>((_, reject) =>
             setTimeout(
-              () => reject(new Error("push timeout")),
-              PER_SUB_TIMEOUT_MS + 500,
-            ),
+              () => reject(new Error('push timeout')),
+              PER_SUB_TIMEOUT_MS + 500
+            )
           ),
         ]);
         // Bump last_seen_at to keep the row warm
         await supabase
-          .from("push_subscriptions")
+          .from('push_subscriptions')
           .update({ last_seen_at: new Date().toISOString() })
-          .eq("id", sub.id);
+          .eq('id', sub.id);
         result.delivered += 1;
       } catch (e: unknown) {
-        const err = e as { statusCode?: number; body?: string; message?: string };
+        const err = e as {
+          statusCode?: number;
+          body?: string;
+          message?: string;
+        };
         if (err.statusCode && EXPIRED_STATUS_CODES.has(err.statusCode)) {
           // The browser revoked the subscription. Garbage-collect.
-          await supabase
-            .from("push_subscriptions")
-            .delete()
-            .eq("id", sub.id);
+          await supabase.from('push_subscriptions').delete().eq('id', sub.id);
           result.expired += 1;
         } else {
           console.warn(
             `[push-dispatch] delivery failed for sub ${sub.id}:`,
             err.statusCode,
-            err.message ?? err.body?.slice(0, 200),
+            err.message ?? err.body?.slice(0, 200)
           );
           result.failed += 1;
         }
       }
-    }),
+    })
   );
 
   return result;

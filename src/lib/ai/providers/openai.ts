@@ -1,7 +1,10 @@
-import type { ProviderResult } from '../types'
-import { openAiCompatibleChat, type OpenAiCompatibleArgs } from './openai-compatible'
+import type { ProviderResult } from '../types';
+import {
+  openAiCompatibleChat,
+  type OpenAiCompatibleArgs,
+} from './openai-compatible';
 
-const OPENAI_URL = 'https://api.openai.com/v1'
+const OPENAI_URL = 'https://api.openai.com/v1';
 
 /**
  * Call OpenAI's Chat Completions endpoint with the caller's own key.
@@ -9,7 +12,7 @@ const OPENAI_URL = 'https://api.openai.com/v1'
  * in `generateReply`).
  */
 export async function generateOpenAi(
-  args: Omit<OpenAiCompatibleArgs, 'baseUrl'>,
+  args: Omit<OpenAiCompatibleArgs, 'baseUrl'>
 ): Promise<ProviderResult> {
-  return openAiCompatibleChat({ ...args, baseUrl: OPENAI_URL })
+  return openAiCompatibleChat({ ...args, baseUrl: OPENAI_URL });
 }

@@ -8,58 +8,63 @@
 // This file is served at /sw.js from /public/sw.js. It must live at
 // the root scope so the Push API can find it on every page.
 
-self.addEventListener("install", (event) => {
+self.addEventListener('install', (event) => {
   // Take over immediately so the next reload uses this version
   // without waiting for the old one to die.
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
+self.addEventListener('activate', (event) => {
   // Claim any uncontrolled clients (open tabs) so they pick up
   // this service worker without a manual reload.
   event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener("push", (event) => {
+self.addEventListener('push', (event) => {
   let payload = {};
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
     // Some senders ship a plain text payload. Fall back gracefully.
-    payload = { title: "New message", body: event.data ? event.data.text() : "" };
+    payload = {
+      title: 'New message',
+      body: event.data ? event.data.text() : '',
+    };
   }
 
-  const title = payload.title || "wacrm";
-  const body = payload.body || "";
-  const url = payload.url || "/notifications";
-  const tag = payload.notification_id || "wacrm";
+  const title = payload.title || 'wacrm';
+  const body = payload.body || '';
+  const url = payload.url || '/notifications';
+  const tag = payload.notification_id || 'wacrm';
 
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
       tag, // collapses duplicate notifications with the same tag
-      icon: "/icon",
-      badge: "/icon",
+      icon: '/icon',
+      badge: '/icon',
       data: { url, notification_id: payload.notification_id },
       // Keep it brief — most platforms truncate after ~125 chars.
       requireInteraction: false,
-    }),
+    })
   );
 });
 
-self.addEventListener("notificationclick", (event) => {
+self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) || "/notifications";
+  const targetUrl =
+    (event.notification.data && event.notification.data.url) ||
+    '/notifications';
 
   event.waitUntil(
     self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
+      .matchAll({ type: 'window', includeUncontrolled: true })
       .then((windowClients) => {
         // If a tab is already open, focus it. Otherwise open a new one.
         for (const client of windowClients) {
-          if ("focus" in client) {
+          if ('focus' in client) {
             client.focus();
-            if ("navigate" in client) {
+            if ('navigate' in client) {
               return client.navigate(targetUrl);
             }
             return;
@@ -68,6 +73,6 @@ self.addEventListener("notificationclick", (event) => {
         if (self.clients.openWindow) {
           return self.clients.openWindow(targetUrl);
         }
-      }),
+      })
   );
 });

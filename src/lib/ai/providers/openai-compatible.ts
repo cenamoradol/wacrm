@@ -1,12 +1,12 @@
-import { AiError, type ProviderResult } from '../types'
-import { MAX_OUTPUT_TOKENS } from '../defaults'
+import { AiError, type ProviderResult } from '../types';
+import { MAX_OUTPUT_TOKENS } from '../defaults';
 import {
   mergeConsecutive,
   normalizeUsage,
   providerHttpError,
   toNetworkError,
   type ProviderArgs,
-} from './shared'
+} from './shared';
 
 /**
  * Shared OpenAI-compatible Chat Completions call.
@@ -17,15 +17,15 @@ import {
  * The wrappers (`openai.ts`, `minimax.ts`) only differ in the base URL.
  */
 export interface OpenAiCompatibleArgs extends ProviderArgs {
-  baseUrl: string
+  baseUrl: string;
 }
 
 export async function openAiCompatibleChat(
-  args: OpenAiCompatibleArgs,
+  args: OpenAiCompatibleArgs
 ): Promise<ProviderResult> {
-  const { apiKey, model, systemPrompt, messages, timeoutMs, baseUrl } = args
+  const { apiKey, model, systemPrompt, messages, timeoutMs, baseUrl } = args;
 
-  let res: Response
+  let res: Response;
   try {
     res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
@@ -42,33 +42,36 @@ export async function openAiCompatibleChat(
         max_completion_tokens: MAX_OUTPUT_TOKENS,
       }),
       signal: AbortSignal.timeout(timeoutMs),
-    })
+    });
   } catch (err) {
-    throw toNetworkError(err)
+    throw toNetworkError(err);
   }
 
   if (!res.ok) {
-    throw await providerHttpError('OpenAI-compatible', res)
+    throw await providerHttpError('OpenAI-compatible', res);
   }
 
   const data = (await res.json().catch(() => null)) as {
-    choices?: { message?: { content?: string } }[]
+    choices?: { message?: { content?: string } }[];
     usage?: {
-      prompt_tokens?: number
-      completion_tokens?: number
-      total_tokens?: number
-    }
-  } | null
-  const text = data?.choices?.[0]?.message?.content
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
+  } | null;
+  const text = data?.choices?.[0]?.message?.content;
   if (!text || typeof text !== 'string' || !text.trim()) {
-    throw new AiError('OpenAI-compatible provider returned an empty response.', {
-      code: 'empty_response',
-    })
+    throw new AiError(
+      'OpenAI-compatible provider returned an empty response.',
+      {
+        code: 'empty_response',
+      }
+    );
   }
   const usage = normalizeUsage({
     prompt: data?.usage?.prompt_tokens,
     completion: data?.usage?.completion_tokens,
     total: data?.usage?.total_tokens,
-  })
-  return { text, usage }
+  });
+  return { text, usage };
 }

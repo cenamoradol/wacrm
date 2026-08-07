@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
-import { dispatchToUser, type DispatchPayload } from "@/lib/push/dispatch";
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { dispatchToUser, type DispatchPayload } from '@/lib/push/dispatch';
 
 const Body = z.object({
   notification_id: z.string().uuid(),
@@ -31,21 +31,21 @@ const Body = z.object({
 export async function POST(req: Request) {
   // --- 1. Verify the shared-secret signature -------------------------
   const secret = process.env.PUSH_DISPATCH_SECRET;
-  const provided = req.headers.get("x-push-signature");
+  const provided = req.headers.get('x-push-signature');
 
   if (!secret) {
     // Operator hasn't configured a secret. Refuse everything rather
     // than accept unsigned requests — better to fail closed than to
     // open a forge-able push endpoint.
     return NextResponse.json(
-      { error: "Push dispatch not configured" },
-      { status: 503 },
+      { error: 'Push dispatch not configured' },
+      { status: 503 }
     );
   }
   if (!provided) {
     return NextResponse.json(
-      { error: "Missing X-Push-Signature" },
-      { status: 401 },
+      { error: 'Missing X-Push-Signature' },
+      { status: 401 }
     );
   }
 
@@ -53,20 +53,20 @@ export async function POST(req: Request) {
 
   // HMAC-SHA256 (hex). Same algorithm the trigger uses (see
   // supabase/migrations/057_webpush_subscriptions.sql).
-  const { createHmac, timingSafeEqual } = await import("node:crypto");
-  const expected = createHmac("sha256", secret)
-    .update(raw, "utf8")
-    .digest("hex");
+  const { createHmac, timingSafeEqual } = await import('node:crypto');
+  const expected = createHmac('sha256', secret)
+    .update(raw, 'utf8')
+    .digest('hex');
 
   // `timingSafeEqual` requires equal-length buffers; a wrong-length
   // signature from a forger fails the length check immediately.
-  const expectedBuf = Buffer.from(expected, "utf8");
-  const providedBuf = Buffer.from(provided, "utf8");
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const providedBuf = Buffer.from(provided, 'utf8');
   if (
     expectedBuf.length !== providedBuf.length ||
     !timingSafeEqual(expectedBuf, providedBuf)
   ) {
-    return NextResponse.json({ error: "Bad signature" }, { status: 401 });
+    return NextResponse.json({ error: 'Bad signature' }, { status: 401 });
   }
 
   // --- 2. Parse + validate the payload --------------------------------
@@ -74,14 +74,14 @@ export async function POST(req: Request) {
   try {
     json = JSON.parse(raw);
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
   const parsed = Body.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Invalid payload", issues: parsed.error.flatten() },
-      { status: 400 },
+      { error: 'Invalid payload', issues: parsed.error.flatten() },
+      { status: 400 }
     );
   }
 

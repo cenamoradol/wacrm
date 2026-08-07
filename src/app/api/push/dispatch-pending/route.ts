@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import { createClient as createServiceClient } from "@supabase/supabase-js";
-import { dispatchToUser, type DispatchPayload } from "@/lib/push/dispatch";
+import { NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { createClient as createServiceClient } from '@supabase/supabase-js';
+import { dispatchToUser, type DispatchPayload } from '@/lib/push/dispatch';
 
 /**
  * POST /api/push/dispatch-pending
@@ -28,24 +28,30 @@ export async function POST() {
     data: { user },
   } = await serverSupabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { ok: false, error: 'Unauthorized' },
+      { status: 401 }
+    );
   }
 
   // Read up to 50 undispatched notifications for this user, oldest
   // first. RLS limits the read to rows the user owns; no service
   // role needed.
   const { data: rows, error } = await serverSupabase
-    .from("notifications")
+    .from('notifications')
     .select(
-      "id, account_id, user_id, type, title, body, conversation_id, created_at",
+      'id, account_id, user_id, type, title, body, conversation_id, created_at'
     )
-    .eq("user_id", user.id)
-    .is("pushed_at", null)
-    .order("created_at", { ascending: true })
+    .eq('user_id', user.id)
+    .is('pushed_at', null)
+    .order('created_at', { ascending: true })
     .limit(50);
 
   if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: error.message },
+      { status: 500 }
+    );
   }
 
   if (!rows || rows.length === 0) {
@@ -55,7 +61,14 @@ export async function POST() {
   // Dispatch first, then mark `pushed_at` only on rows where the
   // push actually reached a device. This way a failed push (e.g.
   // stale FCM endpoint that times out) is retried on the next poll.
-  const results: { id: string; ok: boolean; delivered: number; failed: number; expired: number; skipped: boolean }[] = [];
+  const results: {
+    id: string;
+    ok: boolean;
+    delivered: number;
+    failed: number;
+    expired: number;
+    skipped: boolean;
+  }[] = [];
   const successfulIds: string[] = [];
 
   for (const row of rows) {
@@ -70,9 +83,7 @@ export async function POST() {
       created_at: row.created_at,
     };
     const result = await dispatchToUser(payload);
-    const ok =
-      !result.skipped &&
-      (result.delivered > 0 || result.expired > 0);
+    const ok = !result.skipped && (result.delivered > 0 || result.expired > 0);
     results.push({
       id: row.id,
       ok,
@@ -95,12 +106,12 @@ export async function POST() {
     const serviceSupabase = createServiceClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      { auth: { persistSession: false } },
+      { auth: { persistSession: false } }
     );
     await serviceSupabase
-      .from("notifications")
+      .from('notifications')
       .update({ pushed_at: new Date().toISOString() })
-      .in("id", successfulIds);
+      .in('id', successfulIds);
   }
 
   return NextResponse.json({ ok: true, dispatched: results.length, results });

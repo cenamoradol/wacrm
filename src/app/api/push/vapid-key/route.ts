@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
 
 /**
  * GET /api/push/vapid-key
@@ -20,8 +20,8 @@ export async function GET() {
         // service worker is happy to re-subscribe to a new key. The
         // 5-minute cache keeps the SW happy on hard refreshes
         // without hitting Next on every page load.
-        "Cache-Control": "public, max-age=300, s-maxage=300",
+        'Cache-Control': 'public, max-age=300, s-maxage=300',
       },
-    },
+    }
   );
 }

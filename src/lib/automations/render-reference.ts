@@ -13,9 +13,9 @@
 
 /** Hard cap on reference vocabulary text size. Generous for any
  *  catalog a small business actually maintains; truncates beyond. */
-const MAX_REFERENCE_CHARS = 8 * 1024
+const MAX_REFERENCE_CHARS = 8 * 1024;
 
-const TRUNCATION_MARKER = '\n... [truncated]'
+const TRUNCATION_MARKER = '\n... [truncated]';
 
 /**
  * Render a reference value for inclusion in the LLM prompt. Pretty-
@@ -28,23 +28,23 @@ const TRUNCATION_MARKER = '\n... [truncated]'
  * webhook response can't blow the prompt budget.
  */
 export function renderReference(raw: unknown): string {
-  if (raw == null) return ''
-  if (typeof raw === 'string') return truncate(raw)
+  if (raw == null) return '';
+  if (typeof raw === 'string') return truncate(raw);
   if (typeof raw === 'number' || typeof raw === 'boolean') {
-    return truncate(String(raw))
+    return truncate(String(raw));
   }
   // Anything else (object, array) → pretty JSON.
   try {
-    return truncate(JSON.stringify(raw, null, 2))
+    return truncate(JSON.stringify(raw, null, 2));
   } catch {
     // Circular structures / BigInt etc. — best-effort string fallback.
-    return truncate(String(raw))
+    return truncate(String(raw));
   }
 }
 
 function truncate(s: string): string {
-  if (s.length <= MAX_REFERENCE_CHARS) return s
-  return s.slice(0, MAX_REFERENCE_CHARS) + TRUNCATION_MARKER
+  if (s.length <= MAX_REFERENCE_CHARS) return s;
+  return s.slice(0, MAX_REFERENCE_CHARS) + TRUNCATION_MARKER;
 }
 
 /**
@@ -56,43 +56,40 @@ function truncate(s: string): string {
  * Kept separate from `interpolate()` because we want the raw value, not
  * a stringified version — the renderer does its own pretty-printing.
  */
-export function resolveReferencePath(
-  vars: unknown,
-  rawPath: string,
-): unknown {
-  const path = rawPath.trim()
-  if (!path) return undefined
-  const stripped = path.startsWith('vars.') || path === 'vars' ? path.replace(/^vars\.?/, '') : path
-  if (!stripped) return undefined
-  const parts: Array<string | number> = []
+export function resolveReferencePath(vars: unknown, rawPath: string): unknown {
+  const path = rawPath.trim();
+  if (!path) return undefined;
+  const stripped =
+    path.startsWith('vars.') || path === 'vars'
+      ? path.replace(/^vars\.?/, '')
+      : path;
+  if (!stripped) return undefined;
+  const parts: Array<string | number> = [];
   for (const segment of stripped.split('.')) {
-    const m = segment.match(/^([\w]+)((?:\[\d+\])+)$/)
+    const m = segment.match(/^([\w]+)((?:\[\d+\])+)$/);
     if (m) {
-      parts.push(m[1])
+      parts.push(m[1]);
       for (const idx of segment.matchAll(/\[(\d+)\]/g)) {
-        parts.push(Number(idx[1]))
+        parts.push(Number(idx[1]));
       }
     } else {
-      parts.push(segment)
+      parts.push(segment);
     }
   }
-  return resolvePath(vars, parts)
+  return resolvePath(vars, parts);
 }
 
-function resolvePath(
-  root: unknown,
-  parts: Array<string | number>,
-): unknown {
-  let value: unknown = root
+function resolvePath(root: unknown, parts: Array<string | number>): unknown {
+  let value: unknown = root;
   for (const part of parts) {
-    if (value == null) return undefined
+    if (value == null) return undefined;
     if (typeof part === 'number') {
-      if (!Array.isArray(value)) return undefined
-      value = value[part]
+      if (!Array.isArray(value)) return undefined;
+      value = value[part];
     } else {
-      if (typeof value !== 'object') return undefined
-      value = (value as Record<string, unknown>)[part]
+      if (typeof value !== 'object') return undefined;
+      value = (value as Record<string, unknown>)[part];
     }
   }
-  return value
+  return value;
 }

@@ -1,7 +1,10 @@
-import type { ProviderResult } from '../types'
-import { openAiCompatibleChat, type OpenAiCompatibleArgs } from './openai-compatible'
+import type { ProviderResult } from '../types';
+import {
+  openAiCompatibleChat,
+  type OpenAiCompatibleArgs,
+} from './openai-compatible';
 
-const MINIMAX_URL = 'https://api.minimax.io/v1'
+const MINIMAX_URL = 'https://api.minimax.io/v1';
 
 /**
  * MiniMax adapter — OpenAI-compatible Chat Completions at api.minimax.io.
@@ -12,7 +15,7 @@ const MINIMAX_URL = 'https://api.minimax.io/v1'
  * model is configured in `defaults.ts` (MINIMAX_DEFAULT_MODEL).
  */
 export async function generateMiniMax(
-  args: Omit<OpenAiCompatibleArgs, 'baseUrl'>,
+  args: Omit<OpenAiCompatibleArgs, 'baseUrl'>
 ): Promise<ProviderResult> {
-  return openAiCompatibleChat({ ...args, baseUrl: MINIMAX_URL })
+  return openAiCompatibleChat({ ...args, baseUrl: MINIMAX_URL });
 }

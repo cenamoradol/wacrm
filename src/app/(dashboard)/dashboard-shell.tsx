@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { AuthProvider, useAuth } from "@/hooks/use-auth";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
-import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
-import { WebPushBootstrap } from "@/components/notifications/webpush-bootstrap";
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { AuthProvider, useAuth } from '@/hooks/use-auth';
+import { Sidebar } from '@/components/layout/sidebar';
+import { Header } from '@/components/layout/header';
+import { PresenceHeartbeat } from '@/components/presence/presence-heartbeat';
+import { WebPushBootstrap } from '@/components/notifications/webpush-bootstrap';
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -23,16 +23,16 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && !user) {
-      router.push("/login");
+      router.push('/login');
     }
   }, [user, loading, router]);
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
+      <div className="bg-background flex h-screen items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <div className="border-primary h-8 w-8 animate-spin rounded-full border-2 border-t-transparent" />
+          <p className="text-muted-foreground text-sm">Loading...</p>
         </div>
       </div>
     );
@@ -48,7 +48,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
     // here also unsubscribes so the next person on the same device
     // doesn't inherit the previous user's push.
     <WebPushBootstrap>
-      <div className="flex h-screen overflow-hidden bg-background">
+      <div className="bg-background flex h-screen overflow-hidden">
         {/* Reports this tab's online/away presence once we know a user is
             signed in. Headless — renders nothing. */}
         <PresenceHeartbeat />

@@ -1,5 +1,5 @@
-import type { AutomationTriggerType } from '@/types'
-import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
+import type { AutomationTriggerType } from '@/types';
+import { validateInteractivePayload } from '@/lib/whatsapp/interactive';
 
 // ------------------------------------------------------------
 // Pre-flight config validation for automations about to be activated.
@@ -17,128 +17,172 @@ import { validateInteractivePayload } from '@/lib/whatsapp/interactive'
 
 export interface ValidationIssue {
   /** Dot-path for the UI to highlight; stable enough to build a table. */
-  path: string
-  message: string
+  path: string;
+  message: string;
 }
 
 interface StepLike {
-  step_type: string
-  step_config: Record<string, unknown>
-  branches?: { yes?: StepLike[]; no?: StepLike[] }
+  step_type: string;
+  step_config: Record<string, unknown>;
+  branches?: { yes?: StepLike[]; no?: StepLike[] };
 }
 
-export function validateStepsForActivation(steps: StepLike[]): ValidationIssue[] {
-  const issues: ValidationIssue[] = []
+export function validateStepsForActivation(
+  steps: StepLike[]
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
   if (!Array.isArray(steps) || steps.length === 0) {
     issues.push({
       path: 'steps',
       message: 'active automations need at least one step',
-    })
-    return issues
+    });
+    return issues;
   }
-  walk(steps, '', issues)
-  return issues
+  walk(steps, '', issues);
+  return issues;
 }
 
-function walk(steps: StepLike[], prefix: string, issues: ValidationIssue[]): void {
+function walk(
+  steps: StepLike[],
+  prefix: string,
+  issues: ValidationIssue[]
+): void {
   steps.forEach((s, i) => {
-    const path = `${prefix}steps[${i}]`
-    validateOne(s, path, issues)
+    const path = `${prefix}steps[${i}]`;
+    validateOne(s, path, issues);
     if (s.step_type === 'condition' && s.branches) {
-      if (s.branches.yes) walk(s.branches.yes, `${path}.yes.`, issues)
-      if (s.branches.no) walk(s.branches.no, `${path}.no.`, issues)
+      if (s.branches.yes) walk(s.branches.yes, `${path}.yes.`, issues);
+      if (s.branches.no) walk(s.branches.no, `${path}.no.`, issues);
     }
-  })
+  });
 }
 
-function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): void {
-  const c = step.step_config ?? {}
+function validateOne(
+  step: StepLike,
+  path: string,
+  issues: ValidationIssue[]
+): void {
+  const c = step.step_config ?? {};
   switch (step.step_type) {
     case 'send_message':
       if (!nonEmpty(c.text)) {
-        issues.push({ path: `${path}.text`, message: 'message text is required' })
+        issues.push({
+          path: `${path}.text`,
+          message: 'message text is required',
+        });
       }
-      break
+      break;
     case 'send_buttons':
     case 'send_list': {
       // The whole step_config IS the interactive payload; validate it
       // against Meta's limits (same check the engine runs before send).
-      const result = validateInteractivePayload(c)
+      const result = validateInteractivePayload(c);
       if (!result.ok) {
-        issues.push({ path: `${path}.interactive`, message: result.error })
+        issues.push({ path: `${path}.interactive`, message: result.error });
       }
-      break
+      break;
     }
     case 'send_template':
       if (!nonEmpty(c.template_name)) {
-        issues.push({ path: `${path}.template_name`, message: 'template name is required' })
+        issues.push({
+          path: `${path}.template_name`,
+          message: 'template name is required',
+        });
       }
-      break
+      break;
     case 'add_tag':
     case 'remove_tag':
       if (!nonEmpty(c.tag_id)) {
-        issues.push({ path: `${path}.tag_id`, message: 'tag is required' })
+        issues.push({ path: `${path}.tag_id`, message: 'tag is required' });
       }
-      break
+      break;
     case 'assign_conversation':
       if (c.mode === 'specific' && !nonEmpty(c.agent_id)) {
         issues.push({
           path: `${path}.agent_id`,
           message: 'agent is required when mode is "specific"',
-        })
+        });
       }
-      break
+      break;
     case 'update_contact_field':
       if (!nonEmpty(c.field)) {
-        issues.push({ path: `${path}.field`, message: 'field name is required' })
+        issues.push({
+          path: `${path}.field`,
+          message: 'field name is required',
+        });
       }
       if (c.value === undefined || c.value === null || c.value === '') {
-        issues.push({ path: `${path}.value`, message: 'field value is required' })
+        issues.push({
+          path: `${path}.value`,
+          message: 'field value is required',
+        });
       }
-      break
+      break;
     case 'create_deal':
       if (!nonEmpty(c.pipeline_id)) {
-        issues.push({ path: `${path}.pipeline_id`, message: 'pipeline is required' })
+        issues.push({
+          path: `${path}.pipeline_id`,
+          message: 'pipeline is required',
+        });
       }
       if (!nonEmpty(c.stage_id)) {
-        issues.push({ path: `${path}.stage_id`, message: 'stage is required' })
+        issues.push({ path: `${path}.stage_id`, message: 'stage is required' });
       }
       if (!nonEmpty(c.title)) {
-        issues.push({ path: `${path}.title`, message: 'title is required' })
+        issues.push({ path: `${path}.title`, message: 'title is required' });
       }
-      break
+      break;
     case 'wait':
-      if (typeof c.amount !== 'number' || !Number.isFinite(c.amount) || c.amount <= 0) {
-        issues.push({ path: `${path}.amount`, message: 'wait amount must be greater than 0' })
+      if (
+        typeof c.amount !== 'number' ||
+        !Number.isFinite(c.amount) ||
+        c.amount <= 0
+      ) {
+        issues.push({
+          path: `${path}.amount`,
+          message: 'wait amount must be greater than 0',
+        });
       }
       if (!['minutes', 'hours', 'days'].includes(String(c.unit))) {
         issues.push({
           path: `${path}.unit`,
           message: 'wait unit must be minutes, hours, or days',
-        })
+        });
       }
-      break
+      break;
     case 'condition':
       // Subject + operand are independently required for every subject,
       // including vars_value — so flag them as separate `if`s and run
       // the subject-specific rules (vars_value only, today) on top.
       if (!nonEmpty(c.subject)) {
-        issues.push({ path: `${path}.subject`, message: 'condition subject is required' })
+        issues.push({
+          path: `${path}.subject`,
+          message: 'condition subject is required',
+        });
       }
       if (!nonEmpty(c.operand)) {
-        issues.push({ path: `${path}.operand`, message: 'condition operand is required' })
+        issues.push({
+          path: `${path}.operand`,
+          message: 'condition operand is required',
+        });
       }
       if (c.subject === 'vars_value') {
         // vars_value is the only subject that needs an explicit operator
         // + value validation — the others all use either a fixed shape
         // (time_of_day operand "HH:mm-HH:mm") or have `value` as optional.
-        const op = c.operator
-        const validOps = ['is_empty', 'is_not_empty', 'equals', 'not_equals', 'contains']
+        const op = c.operator;
+        const validOps = [
+          'is_empty',
+          'is_not_empty',
+          'equals',
+          'not_equals',
+          'contains',
+        ];
         if (op != null && !validOps.includes(String(op))) {
           issues.push({
             path: `${path}.operator`,
             message: `vars_value operator must be one of: ${validOps.join(', ')}`,
-          })
+          });
         }
         if (
           op != null &&
@@ -148,7 +192,7 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
           issues.push({
             path: `${path}.value`,
             message: `vars_value "${String(op)}" requires a non-empty value`,
-          })
+          });
         }
         // Operand cap mirrors the reference_path cap — anything past
         // 200 chars is almost certainly a mistake and keeps prompt-side
@@ -157,43 +201,49 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
           issues.push({
             path: `${path}.operand`,
             message: 'operand must be 200 characters or less',
-          })
+          });
         }
       }
-      break
+      break;
     case 'send_webhook':
       if (!nonEmpty(c.url)) {
-        issues.push({ path: `${path}.url`, message: 'webhook URL is required' })
-        break
+        issues.push({
+          path: `${path}.url`,
+          message: 'webhook URL is required',
+        });
+        break;
       }
       try {
-        const u = new URL(String(c.url))
+        const u = new URL(String(c.url));
         if (u.protocol !== 'http:' && u.protocol !== 'https:') {
           issues.push({
             path: `${path}.url`,
             message: 'webhook URL must use http or https',
-          })
+          });
         }
       } catch {
-        issues.push({ path: `${path}.url`, message: 'webhook URL is not a valid URL' })
+        issues.push({
+          path: `${path}.url`,
+          message: 'webhook URL is not a valid URL',
+        });
       }
-      break
+      break;
     case 'llm_draft_message':
       if (!nonEmpty(c.prompt)) {
         issues.push({
           path: `${path}.prompt`,
           message: 'LLM draft message requires a non-empty prompt',
-        })
+        });
       }
-      break
+      break;
     case 'extract_vars':
       if (!nonEmpty(c.prompt)) {
         issues.push({
           path: `${path}.prompt`,
           message: 'extract_vars requires a non-empty prompt',
-        })
+        });
       }
-      const fields = c.fields
+      const fields = c.fields;
       if (
         !fields ||
         typeof fields !== 'object' ||
@@ -203,27 +253,33 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
         issues.push({
           path: `${path}.fields`,
           message: 'extract_vars requires at least one field',
-        })
+        });
       } else {
-        const allowed = new Set(['string', 'number', 'boolean'])
-        for (const [k, v] of Object.entries(fields as Record<string, unknown>)) {
+        const allowed = new Set(['string', 'number', 'boolean']);
+        for (const [k, v] of Object.entries(
+          fields as Record<string, unknown>
+        )) {
           if (!nonEmpty(k)) {
             issues.push({
               path: `${path}.fields`,
               message: 'field name cannot be empty',
-            })
-            break
+            });
+            break;
           }
           if (typeof v !== 'string' || !allowed.has(v)) {
             issues.push({
               path: `${path}.fields.${k}`,
               message: `field "${k}" type must be one of: string, number, boolean`,
-            })
+            });
           }
         }
       }
-      if (c.reference_path !== undefined && c.reference_path !== null && c.reference_path !== '') {
-        const rp = String(c.reference_path)
+      if (
+        c.reference_path !== undefined &&
+        c.reference_path !== null &&
+        c.reference_path !== ''
+      ) {
+        const rp = String(c.reference_path);
         // Length cap keeps the prompt builder honest — anything past
         // ~200 chars is almost certainly a mistake (paths look like
         // "vars.webhook_response.results[0].items"). Newlines or
@@ -232,21 +288,21 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
           issues.push({
             path: `${path}.reference_path`,
             message: 'reference_path must be 200 characters or less',
-          })
+          });
         } else if (/[\r\n;]/.test(rp)) {
           issues.push({
             path: `${path}.reference_path`,
             message: 'reference_path cannot contain newlines or semicolons',
-          })
+          });
         }
       }
-      break
+      break;
     case 'send_images':
       if (!nonEmpty(c.image_path)) {
         issues.push({
           path: `${path}.image_path`,
           message: 'send_images requires an image_path with [*] wildcards',
-        })
+        });
       }
       if (
         c.max_images !== undefined &&
@@ -257,30 +313,36 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
         issues.push({
           path: `${path}.max_images`,
           message: 'max_images must be a positive number',
-        })
+        });
       }
-      break
+      break;
     case 'close_conversation':
       // No config required.
-      break
+      break;
     default:
-      issues.push({ path, message: `unknown step type: ${step.step_type}` })
+      issues.push({ path, message: `unknown step type: ${step.step_type}` });
   }
 }
 
 export function validateTriggerForActivation(
   triggerType: AutomationTriggerType | string,
-  triggerConfig: unknown,
+  triggerConfig: unknown
 ): ValidationIssue[] {
-  const issues: ValidationIssue[] = []
-  const cfg = (triggerConfig ?? {}) as Record<string, unknown>
+  const issues: ValidationIssue[] = [];
+  const cfg = (triggerConfig ?? {}) as Record<string, unknown>;
 
   if (triggerType === 'keyword_match') {
-    const k = cfg.keywords
+    const k = cfg.keywords;
     if (!Array.isArray(k) || k.length === 0) {
-      issues.push({ path: 'trigger.keywords', message: 'at least one keyword is required' })
+      issues.push({
+        path: 'trigger.keywords',
+        message: 'at least one keyword is required',
+      });
     } else if (k.some((v) => typeof v !== 'string' || v.trim() === '')) {
-      issues.push({ path: 'trigger.keywords', message: 'keywords cannot be empty strings' })
+      issues.push({
+        path: 'trigger.keywords',
+        message: 'keywords cannot be empty strings',
+      });
     }
     // A missing match_type defaults to "contains" at runtime (see
     // automations/engine.ts and flows/engine.ts, which both read
@@ -288,45 +350,52 @@ export function validateTriggerForActivation(
     // value is invalid here. This keeps activation validation in step
     // with the engine and with the builder's "Contains" default — an
     // automation that shows the default in the UI must not be rejected.
-    if (cfg.match_type != null && cfg.match_type !== 'exact' && cfg.match_type !== 'contains') {
+    if (
+      cfg.match_type != null &&
+      cfg.match_type !== 'exact' &&
+      cfg.match_type !== 'contains'
+    ) {
       issues.push({
         path: 'trigger.match_type',
         message: 'match type must be "exact" or "contains"',
-      })
+      });
     }
   } else if (triggerType === 'time_based') {
     if (!nonEmpty(cfg.schedule)) {
-      issues.push({ path: 'trigger.schedule', message: 'schedule is required' })
+      issues.push({
+        path: 'trigger.schedule',
+        message: 'schedule is required',
+      });
     }
   } else if (triggerType === 'tag_added') {
     if (!nonEmpty(cfg.tag_id)) {
-      issues.push({ path: 'trigger.tag_id', message: 'tag is required' })
+      issues.push({ path: 'trigger.tag_id', message: 'tag is required' });
     }
   } else if (triggerType === 'interactive_reply') {
-    const ids = cfg.reply_ids
+    const ids = cfg.reply_ids;
     if (!Array.isArray(ids) || ids.length === 0) {
       issues.push({
         path: 'trigger.reply_ids',
         message: 'at least one reply id is required',
-      })
+      });
     } else if (ids.some((v) => typeof v !== 'string' || v.trim() === '')) {
       issues.push({
         path: 'trigger.reply_ids',
         message: 'reply ids cannot be empty strings',
-      })
+      });
     }
   } else if (triggerType === 'llm_condition') {
     if (!nonEmpty(cfg.condition_prompt)) {
       issues.push({
         path: 'trigger.condition_prompt',
         message: 'LLM condition requires a non-empty prompt',
-      })
+      });
     }
   }
 
-  return issues
+  return issues;
 }
 
 function nonEmpty(v: unknown): boolean {
-  return typeof v === 'string' && v.trim().length > 0
+  return typeof v === 'string' && v.trim().length > 0;
 }
