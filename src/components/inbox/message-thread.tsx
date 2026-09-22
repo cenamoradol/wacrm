@@ -178,6 +178,7 @@ export function MessageThread({
   const t = useTranslations('Inbox.messageThread');
   const tTimer = useTranslations('Inbox.sessionTimer');
   const tQuote = useTranslations('Inbox.replyQuote');
+  const tBubble = useTranslations('Inbox.bubble');
 
   const { user } = useAuth();
   const { getPresence, getRow, now } = usePresence();
@@ -746,15 +747,23 @@ export function MessageThread({
 
   const contactDisplayName = contact?.name || contact?.phone || 'Customer';
 
-  // Author label for a quoted message: "You" when we sent the parent,
-  // contact name when the customer sent it.
+  // Author label for both the reply-quote and the per-bubble sender
+  // name. Customer → contact display name. Outbound bot → empty (the
+  // "AI" badge already disambiguates). Outbound agent → "You" for the
+  // current viewer, the teammate's full_name from the loaded roster,
+  // or "Agent" as a fallback for old rows that predate the
+  // `messages.sender_id` stamp.
   const authorLabelFor = useCallback(
     (m: Message): string => {
-      const isAgentMsg = m.sender_type === 'agent' || m.sender_type === 'bot';
-      return isAgentMsg ? 'You' : contactDisplayName;
+      if (m.sender_type === 'customer') return contactDisplayName
+      if (m.sender_type === 'bot') return ''
+      if (!m.sender_id) return tBubble('senderFallback')
+      if (m.sender_id === user?.id) return t('me').trim() || 'You'
+      const profile = profiles.find((p) => p.user_id === m.sender_id)
+      return profile?.full_name || profile?.email || tBubble('senderFallback')
     },
-    [contactDisplayName]
-  );
+    [contactDisplayName, profiles, user?.id, t, tBubble]
+  )
 
   const handleStartReply = useCallback(
     (msg: Message) => {
@@ -1151,6 +1160,7 @@ export function MessageThread({
                           reply={reply}
                           reactions={msgReactions}
                           currentUserId={user?.id}
+                          senderLabel={authorLabelFor(msg)}
                           onToggleReaction={handlePillToggle}
                         />
                       </MessageActions>

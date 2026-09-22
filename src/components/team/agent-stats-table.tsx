@@ -18,7 +18,7 @@ interface AgentStatsTableProps {
 }
 
 export function AgentStatsTable({ agents, loading }: AgentStatsTableProps) {
-  const t = useTranslations('Team');
+  const t = useTranslations('Team.page');
 
   if (loading) {
     return (

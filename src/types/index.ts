@@ -546,8 +546,25 @@ export type AutomationTriggerConfig =
   | LlmConditionTriggerConfig
   | Record<string, unknown>;
 
+/**
+ * `send_message` step. Two modes:
+ *   - simple — set `text`; the engine interpolates `{{ vars.* }}` and sends.
+ *   - list   — set `list_path` (with `[*]`) + `item_template` (with
+ *              `{{ loop.<field> }}` / `{{ loop.index }}`); the engine iterates
+ *              the array, joins each rendered item with "\n\n", and sends ONE
+ *              WhatsApp text message with the whole result. Use this instead
+ *              of `send_images` when the customer would otherwise receive N
+ *              bubble messages (which Meta charges per message).
+ *
+ * Validate/engine enforces mutual shape: list mode requires BOTH fields,
+ * simple mode requires `text`.
+ */
 export interface SendMessageStepConfig {
-  text: string;
+  text?: string;
+  /** Path with `[*]` to iterate (e.g. "vars.webhook_response.results[*]"). */
+  list_path?: string;
+  /** Per-item template; supports `{{ loop.<field> }}` and `{{ loop.index }}`. */
+  item_template?: string;
 }
 
 /**

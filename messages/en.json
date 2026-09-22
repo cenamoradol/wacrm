@@ -149,24 +149,24 @@
       "colAssigned": "Assigned",
       "colMessages": "Messages",
       "colFrt": "First Response",
-      "colClosed": "Closed"
+      "colClosed": "Closed",
+      "noMembersTitle": "No team members yet",
+      "noMembersDesc": "Invite teammates in Settings → Members to start seeing their stats here.",
+      "role": {
+        "owner": "Owner",
+        "admin": "Admin",
+        "agent": "Agent",
+        "viewer": "Viewer"
+      },
+      "presence": {
+        "online": "Online",
+        "away": "Away",
+        "offline": "Offline"
+      }
     },
     "range": {
       "days": "{count}d"
-    },
-    "role": {
-      "owner": "Owner",
-      "admin": "Admin",
-      "agent": "Agent",
-      "viewer": "Viewer"
-    },
-    "presence": {
-      "online": "Online",
-      "away": "Away",
-      "offline": "Offline"
-    },
-    "noMembersTitle": "No team members yet",
-    "noMembersDesc": "Invite teammates in Settings → Members to start seeing their stats here."
+    }
   },
   "Inbox": {
     "page": {
@@ -259,7 +259,8 @@
       "interactiveReply": "[Interactive reply]",
       "unsupported": "[Unsupported message type]",
       "aiBadge": "AI",
-      "aiBadgeTitle": "Sent automatically by the AI assistant"
+      "aiBadgeTitle": "Sent automatically by the AI assistant",
+      "senderFallback": "Agent"
     },
     "actions": {
       "reply": "Reply",
@@ -990,6 +991,13 @@
       "config": {
         "messageText": "Message text",
         "placeholderMessageText": "Hi! Thanks for reaching out…",
+        "messageTextListHint": "Or fill list_path + item_template below to render an array into one message (Message text above is ignored when both list fields are set).",
+        "messageListPathLabel": "List path (optional)",
+        "messageListPathPlaceholder": "vars.webhook_response.results[*]",
+        "messageListPathHint": "Path with [*] to iterate. When set, item_template renders per item using any field of the array (for example loop.title), and all items join into ONE WhatsApp message.",
+        "messageItemTemplateLabel": "Item template (optional)",
+        "messageItemTemplatePlaceholder": "'{{ loop.title }} {{ loop.year }}\nPrecio: L. {{ loop.price }}\nColor: {{ loop.colorRef.name }}'",
+        "messageItemTemplateHint": "Per-item template. Use the prefix loop. followed by any field name on the array item (loop.title, loop.price, loop.year). The prefix loop.index gives the 1-based item number.",
         "tagLabel": "Tag",
         "modeLabel": "Mode",
         "modes": {

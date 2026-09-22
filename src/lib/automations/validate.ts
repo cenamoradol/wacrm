@@ -64,14 +64,32 @@ function validateOne(
 ): void {
   const c = step.step_config ?? {};
   switch (step.step_type) {
-    case 'send_message':
-      if (!nonEmpty(c.text)) {
+    case 'send_message': {
+      // List mode (list_path + item_template) replaces `text`.
+      const hasList = nonEmpty(c.list_path) && nonEmpty(c.item_template);
+      if (!hasList && !nonEmpty(c.text)) {
         issues.push({
           path: `${path}.text`,
-          message: 'message text is required',
+          message:
+            'message text is required (or set list_path + item_template for list mode)',
         });
       }
+      if (nonEmpty(c.list_path)) {
+        if (!String(c.list_path).includes('[*]')) {
+          issues.push({
+            path: `${path}.list_path`,
+            message: 'list_path must contain a [*] wildcard',
+          });
+        }
+        if (!nonEmpty(c.item_template)) {
+          issues.push({
+            path: `${path}.item_template`,
+            message: 'item_template is required when list_path is set',
+          });
+        }
+      }
       break;
+    }
     case 'send_buttons':
     case 'send_list': {
       // The whole step_config IS the interactive payload; validate it

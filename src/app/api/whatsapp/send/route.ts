@@ -184,6 +184,8 @@ export async function POST(request: Request) {
         templateMessageParams: template_message_params,
         interactivePayload: interactive_payload,
         replyToMessageId: reply_to_message_id,
+        // Stamp the agent onto the message so /team can attribute it.
+        senderUserId: user.id,
       });
 
       return NextResponse.json({

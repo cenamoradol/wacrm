@@ -448,9 +448,28 @@ async function runStep(
     case 'send_message': {
       const cfg = step.step_config as SendMessageStepConfig;
       if (!args.contactId) throw new Error('send_message needs a contact');
-      const text = interpolate(cfg.text, args);
-      if (!text.trim()) throw new Error('send_message has empty text');
       const conversationId = await resolveConversationId(args);
+
+      let text: string;
+      if (cfg.list_path && cfg.item_template) {
+        // List mode: render item_template per array item with the
+        // `loop.*` scope, join with "\n\n", send ONE WhatsApp message.
+        // Reuses expandWildcardPath() / interpolate() that send_images
+        // already relies on — no new infra.
+        const items = expandWildcardPath(
+          args.context.vars ?? {},
+          cfg.list_path
+        );
+        text = items
+          .map(({ item, index }) =>
+            interpolate(cfg.item_template!, args, { item, index })
+          )
+          .join('\n\n');
+      } else {
+        text = interpolate(cfg.text ?? '', args);
+      }
+
+      if (!text.trim()) throw new Error('send_message has empty text');
       const { whatsapp_message_id } = await engineSendText({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
@@ -1419,10 +1438,16 @@ function expandWildcardPath(
   if (!Array.isArray(arr)) return [];
 
   // For each item, resolve the suffix path against the item itself.
+  // When the suffix is empty (e.g. `results[*]` with no trailing
+  // path), the iteration target IS the array item — there's no scalar
+  // string to extract. Keep the item with a placeholder value so the
+  // filter below drops nothing; callers that only need `item`/`index`
+  // (like `send_message` list mode) never read `value`.
   const suffixParts = parseDottedPath(suffixTrimmed);
+  const hasSuffix = suffixParts.length > 0;
   return arr
     .map((item, i) => {
-      const value = resolvePath(item, suffixParts);
+      const value = hasSuffix ? resolvePath(item, suffixParts) : '*';
       return {
         index: i + 1,
         item,

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse as parseIcu } from '@formatjs/icu-messageformat-parser';
 
 // Locale dictionaries are hand-maintained. English is the source of
 // truth (src/i18n/request.ts falls back to en.json only when a whole
@@ -42,4 +43,67 @@ describe('message catalogue parity', () => {
     const orphaned = [...translated].filter((k) => !source.has(k)).sort();
     expect(orphaned, `${locale}.json has keys absent from en.json`).toEqual([]);
   });
+
+  // Strings passed to next-intl's `t()` are parsed as ICU MessageFormat.
+  // Bare `{` outside a single-quoted region is invalid (`{{` is NOT an
+  // escape in this parser). Hints/examples that want to show literal
+  // `{{ loop.title }}` must wrap the body in `'...'` (ICU quoted literal),
+  // and `**` is rejected inside quotes too. This catches strings that
+  // would surface as `INVALID_MESSAGE: MALFORMED_ARGUMENT` at render.
+  // Scoped to the new list-mode keys added for `send_message` so we
+  // don't trip over pre-existing strings with patterns ICU doesn't
+  // accept (those are a separate, pre-existing concern).
+  const LIST_MODE_KEYS = [
+    'Automations.builder.config.messageTextListHint',
+    'Automations.builder.config.messageListPathLabel',
+    'Automations.builder.config.messageListPathPlaceholder',
+    'Automations.builder.config.messageListPathHint',
+    'Automations.builder.config.messageItemTemplateLabel',
+    'Automations.builder.config.messageItemTemplatePlaceholder',
+    'Automations.builder.config.messageItemTemplateHint',
+  ];
+
+  it.each([SOURCE_LOCALE, ...TRANSLATED_LOCALES])(
+    '%s.json: send_message list-mode strings parse as ICU MessageFormat',
+    (locale) => {
+      const raw = readFileSync(
+        join(MESSAGES_DIR, `${locale}.json`),
+        'utf8'
+      );
+      const tree: unknown = JSON.parse(raw);
+      const get = (key: string): unknown => {
+        let cur: unknown = tree;
+        for (const seg of key.split('.')) {
+          if (cur && typeof cur === 'object') {
+            cur = (cur as Record<string, unknown>)[seg];
+          } else {
+            return undefined;
+          }
+        }
+        return cur;
+      };
+      const bad: string[] = [];
+      for (const key of LIST_MODE_KEYS) {
+        const value = get(key);
+        if (typeof value !== 'string') {
+          bad.push(`  ${key}: missing or not a string`);
+          continue;
+        }
+        try {
+          parseIcu(value);
+        } catch (err) {
+          const code = (err as { code?: string }).code ?? 'UNKNOWN';
+          bad.push(
+            `  ${key}: [${code}] ${(err as Error).message}\n    value: ${JSON.stringify(value).slice(0, 200)}`
+          );
+        }
+      }
+      expect(
+        bad,
+        bad.length === 0
+          ? 'all list-mode strings parse OK'
+          : `${locale}.json has ${bad.length} unparseable list-mode strings:\n${bad.join('\n')}`
+      ).toEqual([]);
+    }
+  );
 });

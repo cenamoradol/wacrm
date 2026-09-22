@@ -40,6 +40,113 @@ describe('validateStepsForActivation', () => {
     ]);
   });
 
+  it('send_message: list mode (list_path + item_template) skips text requirement', () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: 'send_message',
+        step_config: {
+          list_path: 'vars.webhook_response.results[*]',
+          item_template: '{{ loop.title }}',
+        },
+      },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it('send_message: list_path without [*] is rejected', () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: 'send_message',
+        step_config: {
+          list_path: 'vars.webhook_response.results',
+          item_template: '{{ loop.title }}',
+        },
+      },
+    ]);
+    expect(issues.map((i) => i.path)).toContain('steps[0].list_path');
+  });
+
+  it('send_message: list_path requires item_template', () => {
+    const issues = validateStepsForActivation([
+      {
+        step_type: 'send_message',
+        step_config: {
+          list_path: 'vars.webhook_response.results[*]',
+        },
+      },
+    ]);
+    expect(issues.map((i) => i.path)).toContain('steps[0].item_template');
+  });
+
+  // User-facing scenarios — mirror what the builder sees step-by-step
+  // when someone adds a `send_message` step and toggles activation on.
+  // Each scenario produces a SPECIFIC issue(s) the inline validation
+  // panel in automation-builder.tsx renders. If any of these flip,
+  // the UX contract changes.
+  describe('send_message — user click-through scenarios', () => {
+    it('just-added step (empty defaults from blankConfig): 1 issue on text', () => {
+      const issues = validateStepsForActivation([
+        {
+          step_type: 'send_message',
+          step_config: { text: '', list_path: '', item_template: '' },
+        },
+      ]);
+      expect(issues.map((i) => i.path)).toEqual(['steps[0].text']);
+    });
+
+    it('user typed only in text: 0 issues, Save enabled', () => {
+      const issues = validateStepsForActivation([
+        {
+          step_type: 'send_message',
+          step_config: {
+            text: 'Hola, gracias por escribir',
+            list_path: '',
+            item_template: '',
+          },
+        },
+      ]);
+      expect(issues).toEqual([]);
+    });
+
+    it('user typed in list_path by mistake (no [*], no template): 2 issues', () => {
+      // Simulates clicking into the new list_path field by accident.
+      const issues = validateStepsForActivation([
+        {
+          step_type: 'send_message',
+          step_config: {
+            text: '',
+            list_path: 'vars.webhook_response.results',
+            item_template: '',
+          },
+        },
+      ]);
+      const paths = issues.map((i) => i.path).sort();
+      expect(paths).toEqual([
+        'steps[0].item_template',
+        'steps[0].list_path',
+        'steps[0].text',
+      ]);
+    });
+
+    it('user filled list_path with [*] but forgot item_template: 2 issues', () => {
+      const issues = validateStepsForActivation([
+        {
+          step_type: 'send_message',
+          step_config: {
+            text: '',
+            list_path: 'vars.webhook_response.results[*]',
+            item_template: '',
+          },
+        },
+      ]);
+      const paths = issues.map((i) => i.path).sort();
+      expect(paths).toEqual([
+        'steps[0].item_template',
+        'steps[0].text',
+      ]);
+    });
+  });
+
   it('checks wait amount and unit boundaries', () => {
     const issues = validateStepsForActivation([
       { step_type: 'wait', step_config: { amount: 0, unit: 'minutes' } },

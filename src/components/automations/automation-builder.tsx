@@ -71,6 +71,7 @@ import {
   validateTriggerForActivation,
   type ValidationIssue,
 } from '@/lib/automations/validate';
+import { AutomationValidationPanel } from './validation-panel';
 
 // ------------------------------------------------------------
 // Types (builder-local — mirror the flattened rows we POST)
@@ -233,7 +234,7 @@ function asInteractive(
 function blankConfig(type: AutomationStepType): Record<string, unknown> {
   switch (type) {
     case 'send_message':
-      return { text: '' };
+      return { text: '', list_path: '', item_template: '' };
     case 'send_buttons':
       return toStepConfig(blankButtonsPayload());
     case 'send_list':
@@ -876,6 +877,15 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           </span>
         )}
       </header>
+
+      {/* Inline validation panel — surfaces every issue inline so users
+          see exactly which field to fix (the previous "N issues to fix"
+          counter in the header didn't tell them which field). */}
+      {state.is_active && (
+        <div className="mx-auto w-full max-w-2xl px-4 pt-4">
+          <AutomationValidationPanel issues={activationIssues} />
+        </div>
+      )}
 
       {/* Canvas */}
       <div className="relative flex-1 overflow-y-auto">
@@ -1522,14 +1532,50 @@ function StepEditor({
   switch (step.step_type) {
     case 'send_message':
       return (
-        <FieldBlock label={t('config.messageText')}>
-          <Textarea
-            value={(cfg.text as string) ?? ''}
-            onChange={(e) => set({ text: e.target.value })}
-            placeholder={t('config.placeholderMessageText')}
-            className="bg-muted text-foreground min-h-24"
-          />
-        </FieldBlock>
+        <>
+          <FieldBlock label={t('config.messageText')}>
+            <Textarea
+              value={(cfg.text as string) ?? ''}
+              onChange={(e) => set({ text: e.target.value })}
+              placeholder={t('config.placeholderMessageText')}
+              className="bg-muted text-foreground min-h-24"
+            />
+            <p className="text-muted-foreground mt-1 text-[11px]">
+              {t('config.messageTextListHint', {
+                defaultValue:
+                  'Or fill list_path + item_template below to render an array into one message (skips the list_path field above).',
+              })}
+            </p>
+          </FieldBlock>
+          <FieldBlock label={t('config.messageListPathLabel')}>
+            <Input
+              value={(cfg.list_path as string) ?? ''}
+              onChange={(e) => set({ list_path: e.target.value })}
+              placeholder={t('config.messageListPathPlaceholder')}
+              className="bg-muted text-foreground font-mono text-xs"
+            />
+            <p className="text-muted-foreground mt-1 text-[11px]">
+              {t('config.messageListPathHint', {
+                defaultValue:
+                  'Path with [*] to iterate. When set, item_template renders per item using any field of the array (for example loop.title), and all items join into ONE WhatsApp message.',
+              })}
+            </p>
+          </FieldBlock>
+          <FieldBlock label={t('config.messageItemTemplateLabel')}>
+            <Textarea
+              value={(cfg.item_template as string) ?? ''}
+              onChange={(e) => set({ item_template: e.target.value })}
+              placeholder={t('config.messageItemTemplatePlaceholder')}
+              className="bg-muted text-foreground min-h-24 font-mono text-xs"
+            />
+            <p className="text-muted-foreground mt-1 text-[11px]">
+              {t('config.messageItemTemplateHint', {
+                defaultValue:
+                  "Per-item template. Use '{{ loop.index }}. {{ loop.title }}' for numbered list, '{{ loop.<field> }}' for any field on the array item.",
+              })}
+            </p>
+          </FieldBlock>
+        </>
       );
     case 'send_buttons':
     case 'send_list':
@@ -2135,6 +2181,9 @@ function FieldBlock({
 function previewFor(step: BuilderStep): string {
   switch (step.step_type) {
     case 'send_message':
+      if ((step.step_config.list_path as string) && (step.step_config.item_template as string)) {
+        return `list: ${step.step_config.list_path}`;
+      }
       return (step.step_config.text as string) || 'no text yet';
     case 'send_buttons':
     case 'send_list':

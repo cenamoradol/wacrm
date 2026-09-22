@@ -84,6 +84,14 @@ export interface SendMessageParams {
   /** Structured payload for `messageType === 'interactive'`. */
   interactivePayload?: InteractiveMessagePayload | null;
   replyToMessageId?: string | null;
+  /**
+   * Authenticated user_id that authored this outbound message. Stamped
+   * onto `messages.sender_id` so per-agent metrics (response time,
+   * message volume) can attribute correctly. Null when there's no
+   * human caller (the public API path — those writes aren't attributed
+   * to any agent by design).
+   */
+  senderUserId?: string | null;
 }
 
 export interface SendMessageResult {
@@ -202,6 +210,7 @@ export async function sendMessageToConversation(
     templateMessageParams,
     interactivePayload,
     replyToMessageId,
+    senderUserId,
   } = params;
 
   if (!conversationId) {
@@ -458,6 +467,9 @@ export async function sendMessageToConversation(
     .insert({
       conversation_id: conversationId,
       sender_type: 'agent',
+      // Stamped for per-agent attribution (see lib/team/queries.ts).
+      // Nullable because the v1 public API path has no logged-in human.
+      sender_id: senderUserId ?? null,
       content_type: messageType,
       content_text: interactiveBody ?? contentText ?? null,
       media_url: mediaUrl || null,

@@ -1549,6 +1549,248 @@ describe('send_images step', () => {
 });
 
 // ============================================================
+// send_message list mode: `list_path` + `item_template` renders
+// every array item with the `loop.*` scope, joins them, and sends
+// ONE WhatsApp message (not N). Reuses expandWildcardPath() /
+// interpolate() from send_images. Targeted at the Meta per-message
+// pricing change — saves N-1 messages per catalog reply.
+// ============================================================
+describe('send_message list mode', () => {
+  beforeEach(() => {
+    vi.mocked(engineSendText).mockClear();
+    vi.mocked(engineSendText).mockResolvedValue({
+      whatsapp_message_id: 'm1',
+    });
+  });
+
+  function setupSendMessageList(
+    cfg: {
+      text?: string;
+      list_path?: string;
+      item_template?: string;
+    },
+    initialVars: Record<string, unknown> = {}
+  ) {
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [
+      {
+        id: 'a1',
+        account_id: ACCOUNT,
+        user_id: 'u1',
+        name: 'send_message list',
+        trigger_type: 'new_message_received',
+        trigger_config: {},
+        is_active: true,
+      },
+    ];
+    h.state.steps = [
+      {
+        id: 's1',
+        automation_id: 'a1',
+        step_type: 'send_message',
+        position: 0,
+        parent_step_id: null,
+        step_config: cfg,
+      },
+    ];
+    return runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'c1',
+      context: {
+        message_text: 'tienes toyotas?',
+        conversation_id: 'conv-1',
+        vars: initialVars,
+      },
+    });
+  }
+
+  it('sends ONE message with all items joined by blank lines', async () => {
+    await setupSendMessageList(
+      {
+        list_path: 'vars.webhook_response.results[*]',
+        item_template:
+          '**{{ loop.title }} {{loop.year}}** • L. {{ loop.price }}',
+      },
+      {
+        webhook_response: {
+          results: [
+            { title: 'Toyota Tacoma', year: 2018, price: '589000' },
+            { title: 'Toyota, Tacoma 4x4', year: 2019, price: '599000' },
+            { title: 'TOYOTA TACOMA', year: 2019, price: '599000' },
+          ],
+        },
+      }
+    );
+
+    const sendTextSpy = vi.mocked(engineSendText);
+    expect(sendTextSpy).toHaveBeenCalledTimes(1);
+    expect(sendTextSpy.mock.calls[0][0]).toMatchObject({
+      text:
+        '**Toyota Tacoma 2018** • L. 589000\n\n' +
+        '**Toyota, Tacoma 4x4 2019** • L. 599000\n\n' +
+        '**TOYOTA TACOMA 2019** • L. 599000',
+    });
+  });
+
+  it('renders {{ loop.index }} as the 1-based position', async () => {
+    await setupSendMessageList(
+      {
+        list_path: 'vars.webhook_response.results[*]',
+        item_template: '{{ loop.index }}. {{ loop.title }}',
+      },
+      {
+        webhook_response: {
+          results: [{ title: 'A' }, { title: 'B' }, { title: 'C' }],
+        },
+      }
+    );
+
+    const sendTextSpy = vi.mocked(engineSendText);
+    expect(sendTextSpy).toHaveBeenCalledTimes(1);
+    const text = String(sendTextSpy.mock.calls[0][0].text);
+    expect(text).toBe('1. A\n\n2. B\n\n3. C');
+  });
+
+  it('sends nothing when the array is empty', async () => {
+    await setupSendMessageList(
+      {
+        list_path: 'vars.webhook_response.results[*]',
+        item_template: '{{ loop.title }}',
+      },
+      { webhook_response: { results: [] } }
+    );
+
+    expect(vi.mocked(engineSendText)).not.toHaveBeenCalled();
+  });
+
+  it('emits empty string for missing fields rather than skipping the item', async () => {
+    // engineSize: null on one item — interpolate()'s safety net fills it.
+    // The item still appears; only the missing field is blank.
+    await setupSendMessageList(
+      {
+        list_path: 'vars.webhook_response.results[*]',
+        item_template: '**{{ loop.title }}** • Motor {{ loop.engineSize }}',
+      },
+      {
+        webhook_response: {
+          results: [
+            { title: 'Has motor', engineSize: 3.5 },
+            { title: 'No motor', engineSize: null },
+          ],
+        },
+      }
+    );
+
+    const sendTextSpy = vi.mocked(engineSendText);
+    expect(sendTextSpy).toHaveBeenCalledTimes(1);
+    const text = String(sendTextSpy.mock.calls[0][0].text);
+    expect(text).toBe(
+      '**Has motor** • Motor 3.5\n\n**No motor** • Motor '
+    );
+  });
+
+  it('regression: simple mode (no list_path) still sends one text message', async () => {
+    await setupSendMessageList({ text: 'Hola {{ message.text }}' }, {});
+
+    const sendTextSpy = vi.mocked(engineSendText);
+    expect(sendTextSpy).toHaveBeenCalledTimes(1);
+    expect(sendTextSpy.mock.calls[0][0]).toMatchObject({
+      text: 'Hola tienes toyotas?',
+    });
+  });
+
+  it('list mode ignores `text` when both list fields are set', async () => {
+    await setupSendMessageList(
+      {
+        text: 'IGNORED',
+        list_path: 'vars.webhook_response.results[*]',
+        item_template: '{{ loop.title }}',
+      },
+      {
+        webhook_response: {
+          results: [{ title: 'A' }, { title: 'B' }],
+        },
+      }
+    );
+
+    const sendTextSpy = vi.mocked(engineSendText);
+    expect(sendTextSpy).toHaveBeenCalledTimes(1);
+    const text = String(sendTextSpy.mock.calls[0][0].text);
+    expect(text).not.toContain('IGNORED');
+    expect(text).toBe('A\n\nB');
+  });
+
+  // End-to-end shape: the user's actual Tacoma catalog response — same
+  // item structure (title / year / price / colorRef.name / transmission /
+  // engineSize). Mocks the webhook side and proves `send_message` list
+  // mode joins all items into ONE WhatsApp send with the user's exact
+  // template. This is the test that maps to "Mandame los Toyotas".
+  it('end-to-end: 3 actual-shape vehicles render in one message with the user template', async () => {
+    await setupSendMessageList(
+      {
+        list_path: 'vars.webhook_response.results[*]',
+        item_template:
+          '*{{ loop.title }} {{ loop.year }}*\n' +
+          '• *Precio:* L. {{ loop.price }}\n' +
+          '• *Color:* {{ loop.colorRef.name }}\n' +
+          '• *Transmisión:* {{ loop.transmission }}\n' +
+          '• *Motor:* {{ loop.engineSize }}',
+      },
+      {
+        webhook_response: {
+          results: [
+            {
+              title: 'Toyota Tacoma',
+              year: 2018,
+              price: '589000',
+              transmission: 'Automática',
+              engineSize: 3.5,
+              colorRef: { name: 'Blanco' },
+            },
+            {
+              title: 'Toyota, Tacoma 4x4',
+              year: 2019,
+              price: '599000',
+              transmission: 'Automática',
+              engineSize: 2.7,
+              colorRef: { name: 'Blanco' },
+            },
+            {
+              title: 'TOYOTA TACOMA',
+              year: 2019,
+              price: '599000',
+              transmission: 'Automática',
+              engineSize: 3.5,
+              colorRef: { name: 'Rojo' },
+            },
+          ],
+        },
+      }
+    );
+
+    const sendTextSpy = vi.mocked(engineSendText);
+    expect(sendTextSpy).toHaveBeenCalledTimes(1);
+    const text = String(sendTextSpy.mock.calls[0][0].text);
+
+    // ONE message, NOT 3 — this is the per-message Meta cost saving.
+    const separatorCount = text.split('\n\n').length - 1;
+    expect(separatorCount).toBe(2);
+
+    // Every vehicle must appear, in order, with its specific fields.
+    expect(text).toContain('*Toyota Tacoma 2018*');
+    expect(text).toContain('*Precio:* L. 589000');
+    expect(text).toContain('*Motor:* 3.5');
+    expect(text).toContain('*Toyota, Tacoma 4x4 2019*');
+    expect(text).toContain('*Precio:* L. 599000');
+    expect(text).toContain('*Motor:* 2.7');
+    expect(text).toContain('*TOYOTA TACOMA 2019*');
+    expect(text).toContain('*Color:* Blanco');
+    expect(text).toContain('*Color:* Rojo');
+  });
+});
+
+// ============================================================
 // runAutomationsForTrigger return value: messagesSent counter
 // lets the webhook suppress the AI auto-reply when an automation
 // already replied to the customer.

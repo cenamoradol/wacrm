@@ -27,6 +27,12 @@ interface MessageBubbleProps {
   reply?: { authorLabel: string; preview: string } | null;
   reactions?: MessageReaction[];
   currentUserId?: string;
+  /**
+   * Author label for outbound bubbles ("You", "María", "Agent", etc).
+   * Empty string hides the line; undefined hides too. Customer bubbles
+   * don't pass it — the contact name is already in the thread header.
+   */
+  senderLabel?: string;
   onToggleReaction?: (emoji: string) => void;
 }
 
@@ -297,6 +303,7 @@ export function MessageBubble({
   reply,
   reactions,
   currentUserId,
+  senderLabel,
   onToggleReaction,
 }: MessageBubbleProps) {
   const t = useTranslations('Inbox.bubble');
@@ -309,6 +316,16 @@ export function MessageBubble({
   // group matches the bubble's content area, not the full row.
   return (
     <div className={cn('flex flex-col', isAgent ? 'items-end' : 'items-start')}>
+      {senderLabel && isAgent && (
+        <span
+          className={cn(
+            'mb-0.5 text-[10px] font-medium tracking-wide',
+            isAgent ? 'text-primary-foreground/80' : 'text-muted-foreground',
+          )}
+        >
+          {senderLabel}
+        </span>
+      )}
       <div
         className={cn(
           'relative rounded-2xl px-3 py-2',
