@@ -2038,6 +2038,46 @@ describe('condition step — vars_value', () => {
     expect(vi.mocked(engineSendText).mock.calls[0][0].text).toBe('match');
   });
 
+  // Regression: messages sent inside a condition's YES/NO branch must
+  // bubble up to `runAutomationsForTrigger`'s return so the webhook
+  // can suppress the AI auto-reply. Otherwise the customer gets the
+  // automation's reply AND a redundant LLM-generated one.
+  it('bubbles messagesSent from a branch back to the dispatch result', async () => {
+    vi.mocked(engineSendText).mockClear();
+    vi.mocked(engineSendText).mockResolvedValue({
+      whatsapp_message_id: 'm1',
+    });
+
+    // The customer's actual case: condition evaluates FALSE (results
+    // are non-empty → fall into the NO branch), the NO branch sends
+    // the full list. The webhook needs to know "we already replied,
+    // skip AI auto-reply".
+    const result = await setupConditionBranch(
+      {
+        subject: 'vars_value',
+        operand: 'vars.webhook_response.results',
+        operator: 'is_empty',
+      },
+      [{ step_type: 'send_message', step_config: { text: 'empty branch' } }],
+      [
+        {
+          step_type: 'send_message',
+          step_config: {
+            list_path: 'vars.webhook_response.results[*]',
+            item_template: '{{ loop.title }}',
+          },
+        },
+      ],
+      { webhook_response: { results: [{ title: 'A' }, { title: 'B' }] } }
+    );
+
+    // BEFORE the fix this was 0, which made the webhook fire the AI
+    // auto-reply on top of the automation's send_message — the
+    // customer saw the full list AND a 5-item LLM summary.
+    expect(result.messagesSent).toBe(1);
+    expect(vi.mocked(engineSendText)).toHaveBeenCalledTimes(1);
+  });
+
   it('treats missing operand as a no-match (the no branch runs)', async () => {
     vi.mocked(engineSendText).mockClear();
     await setupConditionBranch(

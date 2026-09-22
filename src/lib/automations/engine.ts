@@ -384,16 +384,21 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<number> {
           detail: `branch=${taken ? 'yes' : 'no'}`,
         });
         // Recurse into the chosen branch at position 0 (children use their
-        // own ordering within the branch scope).
-        await executeStepsFrom({
+        // own ordering within the branch scope). Capture the return value
+        // and merge into the parent's messagesSent — `runStep` bumps
+        // `args.messagesSent` in place inside the *recursive* call's
+        // cloned args (because `{ ...args }` is a shallow copy), so
+        // without this merge the webhook would see 0 messages and the AI
+        // auto-reply would fire on top of an automation that already
+        // replied. Issue: condition-branch sends double-texting customer.
+        const nestedMessagesSent = await executeStepsFrom({
           ...args,
           parentStepId: step.id,
           branch: taken ? 'yes' : 'no',
           startPosition: 0,
           logId: args.logId,
         });
-        // nested branch messages count toward the parent total via
-        // args.messagesSent, which executeStepsFrom returns.
+        args.messagesSent += nestedMessagesSent;
         continue;
       }
 
