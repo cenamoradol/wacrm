@@ -26,10 +26,17 @@ import {
   createClient,
   type PostgrestError,
   type SupabaseClient,
+  type User,
 } from '@supabase/supabase-js';
 
 import { isValidEmail, passwordError } from './credentials';
 import type { AccountRole } from './roles';
+
+/** How many auth users one admin-API page holds. */
+const AUTH_USER_PAGE_SIZE = 1000;
+
+/** How many pages to scan when looking for an auth user. */
+const AUTH_USER_MAX_PAGES = 10;
 
 /** Typed failure with the HTTP status the route should answer with. */
 export class MemberError extends Error {
@@ -108,6 +115,156 @@ async function createAuthUser(args: {
     });
   }
   return data.user.id;
+}
+
+/**
+ * One page of auth users via the admin API.
+ *
+ * GoTrue's admin endpoints have no email / confirmation filter, so
+ * every lookup here scans pages and filters client-side. One page is
+ * 1 000 users — far past any realistic wacrm install.
+ */
+async function listAuthUsersPage(page: number): Promise<User[]> {
+  const { data, error } = await adminClient().auth.admin.listUsers({
+    page,
+    perPage: AUTH_USER_PAGE_SIZE,
+  });
+  if (error) {
+    throw new MemberError(error.message, { status: 500, code: 'auth_error' });
+  }
+  return data.users ?? [];
+}
+
+/** Find an auth user by email (case-insensitive), or null. */
+async function findAuthUserByEmail(email: string): Promise<User | null> {
+  const target = email.trim().toLowerCase();
+  for (let page = 1; page <= AUTH_USER_MAX_PAGES; page++) {
+    const users = await listAuthUsersPage(page);
+    const hit = users.find((u) => (u.email ?? '').toLowerCase() === target);
+    if (hit) return hit;
+    if (users.length < AUTH_USER_PAGE_SIZE) break;
+  }
+  return null;
+}
+
+/** An auth account that exists but never confirmed its email. */
+export interface PendingAuthUser {
+  user_id: string;
+  email: string;
+  created_at: string;
+}
+
+/**
+ * Auth users who never confirmed their email and are not yet part of
+ * the caller's account — the "signed up but never got the mail"
+ * crowd. These are the accounts an admin can activate by hand.
+ */
+export async function listPendingAuthUsers(args: {
+  accountId: string;
+}): Promise<PendingAuthUser[]> {
+  const pending: PendingAuthUser[] = [];
+  for (let page = 1; page <= AUTH_USER_MAX_PAGES; page++) {
+    const users = await listAuthUsersPage(page);
+    for (const u of users) {
+      if (u.email_confirmed_at || !u.email) continue;
+      pending.push({
+        user_id: u.id,
+        email: u.email,
+        created_at: u.created_at,
+      });
+    }
+    if (users.length < AUTH_USER_PAGE_SIZE) break;
+  }
+  if (pending.length === 0) return pending;
+
+  // Drop the ones already in this account (RLS is bypassed here on
+  // purpose — we're the service role).
+  const { data: profiles } = await adminClient()
+    .from('profiles')
+    .select('user_id, account_id')
+    .in(
+      'user_id',
+      pending.map((p) => p.user_id)
+    );
+  const inAccount = new Set(
+    (profiles ?? [])
+      .filter((p) => p.account_id === args.accountId)
+      .map((p) => p.user_id)
+  );
+  return pending.filter((p) => !inAccount.has(p.user_id));
+}
+
+export interface ActivateMemberArgs {
+  /** Caller's RLS-scoped client — the RPC needs the caller's JWT. */
+  supabase: SupabaseClient;
+  accountId: string;
+  userId: string;
+  role: AccountRole;
+  /** Password the teammate will sign in with (they can't reset it
+   *  themselves without access to their mailbox). */
+  password: string;
+}
+
+/**
+ * Activate an account that exists but never confirmed its email:
+ * confirm it, set the password, and attach it to the caller's
+ * account with the given role.
+ *
+ * This is the recovery path for a teammate who registered through the
+ * invite link but can't access their mailbox — the admin does the
+ * confirming on their behalf.
+ */
+export async function activateMemberAccount(
+  args: ActivateMemberArgs
+): Promise<{ user_id: string; email: string; role: AccountRole }> {
+  if (args.role === 'owner') {
+    throw new MemberError("'role' must be one of admin, agent, viewer", {
+      code: 'invalid_role',
+    });
+  }
+  const pwError = passwordError(args.password);
+  if (pwError) {
+    throw new MemberError(pwError, { code: 'invalid_password' });
+  }
+
+  const { data: userData, error: userErr } =
+    await adminClient().auth.admin.getUserById(args.userId);
+  if (userErr || !userData?.user) {
+    throw new MemberError('Account not found', {
+      status: 404,
+      code: 'not_found',
+    });
+  }
+  const user = userData.user;
+  if (!user.email) {
+    throw new MemberError('That account has no email address', {
+      code: 'auth_error',
+    });
+  }
+
+  // Attach to the account first: if that fails, nothing has changed
+  // yet. A user who is already a member is fine — the attach simply
+  // has nothing left to do.
+  const { error: rpcError } = await args.supabase.rpc('add_account_member', {
+    p_user_id: args.userId,
+    p_role: args.role,
+  });
+  if (rpcError && !/already a member/i.test(rpcError.message)) {
+    throw memberRpcError(rpcError);
+  }
+
+  // Confirm the email + set the password they will sign in with.
+  const { error } = await adminClient().auth.admin.updateUserById(args.userId, {
+    email_confirm: true,
+    password: args.password,
+  });
+  if (error) {
+    throw new MemberError(error.message, { status: 400, code: 'auth_error' });
+  }
+
+  await syncProfileEmail(args.userId, user.email);
+
+  return { user_id: args.userId, email: user.email, role: args.role };
 }
 
 /**
@@ -198,6 +355,11 @@ export interface CreateMemberAccountArgs {
  * out of the throwaway personal account the signup trigger gave it
  * into the caller's account with the requested role.
  *
+ * If the email already belongs to an auth account that never
+ * confirmed its email (the teammate registered through the invite
+ * link but can't reach their mailbox), that account is activated
+ * instead of failing — same outcome the admin asked for.
+ *
  * If the attach fails the auth user is removed again, so a failed
  * call never leaves a usable login outside the team.
  */
@@ -220,11 +382,28 @@ export async function createMemberAccount(
     });
   }
 
-  const userId = await createAuthUser({
-    email,
-    password: args.password,
-    fullName: args.fullName,
-  });
+  let userId: string;
+  try {
+    userId = await createAuthUser({
+      email,
+      password: args.password,
+      fullName: args.fullName,
+    });
+  } catch (err) {
+    // The address is taken. If it's a half-registered account, adopt
+    // it instead of dead-ending the admin.
+    if (!(err instanceof MemberError) || err.code !== 'email_taken') throw err;
+    const existing = await findAuthUserByEmail(email);
+    if (!existing) throw err;
+    if (existing.email_confirmed_at) throw err; // A live account — not ours to take.
+    return activateMemberAccount({
+      supabase: args.supabase,
+      accountId: args.accountId,
+      userId: existing.id,
+      role: args.role,
+      password: args.password,
+    });
+  }
 
   const { error } = await args.supabase.rpc('add_account_member', {
     p_user_id: userId,

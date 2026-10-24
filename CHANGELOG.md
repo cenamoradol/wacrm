@@ -37,6 +37,11 @@ exactly as before — push is opt-in per device, opt-out is one click in
   the roster row. Handy when the agent never gets access to that
   mailbox. The account owner's own credentials stay off-limits (they
   manage those from **Settings → Profile**).
+- **Pending confirmations list.** Accounts that signed up but never
+  confirmed their email (e.g. through an invite link) now show up in
+  **Settings → Members** with an **Activate** button: one click
+  confirms the account, sets the password and puts the teammate on
+  the team with the role you pick.
 - **OpenRouter as an AI provider.** Pick it in **Settings → AI
   Assistant** and bring your own OpenRouter key; models are addressed
   as `provider/model` (default `openai/gpt-5.4-mini`).

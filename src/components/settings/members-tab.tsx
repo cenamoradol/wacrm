@@ -31,6 +31,7 @@ import {
   Pencil,
   Plus,
   Trash2,
+  UserCheck,
   UserPlus,
   UsersRound,
 } from 'lucide-react';
@@ -75,7 +76,10 @@ import {
   PresenceDot,
 } from '@/components/presence/presence-dot';
 import { InviteMemberDialog } from './invite-member-dialog';
-import { AddMemberDialog } from './add-member-dialog';
+import {
+  MemberAccessDialog,
+  type PendingAccount,
+} from './member-access-dialog';
 import { EditMemberDialog } from './edit-member-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
@@ -95,6 +99,11 @@ interface Invitation {
   label: string | null;
   created_at: string;
   expires_at: string;
+}
+
+/** An auth account that exists but never confirmed its email. */
+interface PendingAccountRow extends PendingAccount {
+  created_at: string;
 }
 
 // These roles are translated via `useTranslations("Settings.roles")` where they are used.
@@ -139,10 +148,15 @@ export function MembersTab() {
 
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [pendingAccounts, setPendingAccounts] = useState<PendingAccountRow[]>(
+    []
+  );
   const [loading, setLoading] = useState(true);
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [activatingAccount, setActivatingAccount] =
+    useState<PendingAccount | null>(null);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
@@ -151,10 +165,15 @@ export function MembersTab() {
 
   const loadEverything = useCallback(async () => {
     try {
-      const [mres, ires] = await Promise.all([
+      const [mres, ires, pres] = await Promise.all([
         fetch('/api/account/members', { cache: 'no-store' }),
         canManageMembers
           ? fetch('/api/account/invitations', { cache: 'no-store' })
+          : Promise.resolve(null),
+        // Accounts that never confirmed their email — the admin can
+        // activate them by hand.
+        canManageMembers
+          ? fetch('/api/account/members/pending', { cache: 'no-store' })
           : Promise.resolve(null),
       ]);
 
@@ -176,6 +195,21 @@ export function MembersTab() {
         setInvitations(idata.invitations);
       } else {
         setInvitations([]);
+      }
+
+      if (pres) {
+        // Best-effort: an older deployment without the endpoint just
+        // doesn't show the section.
+        if (pres.ok) {
+          const pdata = (await pres.json()) as {
+            pending?: PendingAccountRow[];
+          };
+          setPendingAccounts(pdata.pending ?? []);
+        } else {
+          setPendingAccounts([]);
+        }
+      } else {
+        setPendingAccounts([]);
       }
     } catch (err) {
       console.error('[MembersTab] load error:', err);
@@ -517,6 +551,60 @@ export function MembersTab() {
         </CardContent>
       </Card>
 
+      {/* Accounts that registered but never confirmed their email —
+          admin+. They can't sign in, so the admin activates them by
+          hand (confirm + set a password + give them a role). */}
+      <RequireRole min="admin">
+        {pendingAccounts.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center gap-2">
+              <UserCheck className="text-muted-foreground size-4" />
+              <h3 className="text-foreground text-sm font-semibold">
+                {t('pendingConfirmations')}
+              </h3>
+              <Badge className="bg-muted text-muted-foreground border-border">
+                {pendingAccounts.length}
+              </Badge>
+            </div>
+            <p className="text-muted-foreground mb-3 text-xs">
+              {t('pendingConfirmationsHint')}
+            </p>
+
+            <Card>
+              <CardContent className="p-0">
+                <ul className="divide-border divide-y">
+                  {pendingAccounts.map((acct) => (
+                    <li
+                      key={acct.user_id}
+                      className="flex items-center gap-4 px-4 py-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-foreground truncate text-sm font-medium">
+                          {acct.email}
+                        </p>
+                        <p className="text-muted-foreground mt-0.5 text-xs">
+                          {t('registeredOn', {
+                            date: fmtDate(acct.created_at),
+                          })}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setActivatingAccount(acct)}
+                      >
+                        <UserCheck className="size-4" />
+                        {t('activate')}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </RequireRole>
+
       {/* Pending invitations — admin+ only */}
       <RequireRole min="admin">
         <div>
@@ -613,9 +701,18 @@ export function MembersTab() {
         onCreated={loadEverything}
       />
 
-      <AddMemberDialog
+      <MemberAccessDialog
         open={addMemberOpen}
         onOpenChange={setAddMemberOpen}
+        onCreated={loadEverything}
+      />
+
+      <MemberAccessDialog
+        open={activatingAccount !== null}
+        activate={activatingAccount}
+        onOpenChange={(open) => {
+          if (!open) setActivatingAccount(null);
+        }}
         onCreated={loadEverything}
       />
 
