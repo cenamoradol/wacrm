@@ -294,3 +294,73 @@ describe('generateReply — MiniMax', () => {
     expect(res.text).toBe('');
   });
 });
+
+describe('generateReply — OpenRouter', () => {
+  it('hits openrouter.ai with the OpenAI-compatible body shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      okResponse({
+        choices: [{ message: { content: 'Hello from OpenRouter' } }],
+        usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await generateReply({
+      config: config({
+        provider: 'openrouter',
+        apiKey: 'sk-or-v1-key',
+        model: 'openai/gpt-5.4-mini',
+      }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'Hi' }],
+    });
+
+    expect(res).toEqual({
+      text: 'Hello from OpenRouter',
+      handoff: false,
+      usage: { promptTokens: 12, completionTokens: 4, totalTokens: 16 },
+    });
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(opts.headers.Authorization).toBe('Bearer sk-or-v1-key');
+    const body = JSON.parse(opts.body);
+    expect(body.model).toBe('openai/gpt-5.4-mini');
+    expect(body.messages[0]).toEqual({ role: 'system', content: 'sys' });
+  });
+
+  it('maps a 401 to an invalid_key AiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          errResponse(401, { error: { message: 'No auth credentials found' } })
+        )
+    );
+    await expect(
+      generateReply({
+        config: config({ provider: 'openrouter', apiKey: 'bad' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_key', status: 401 });
+  });
+
+  it('parses handoff sentinel from OpenRouter output', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          okResponse({ choices: [{ message: { content: '[[HANDOFF]]' } }] })
+        )
+    );
+    const res = await generateReply({
+      config: config({ provider: 'openrouter' }),
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'talk to a human' }],
+    });
+    expect(res.handoff).toBe(true);
+    expect(res.text).toBe('');
+  });
+});

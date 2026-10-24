@@ -17,6 +17,9 @@ export const AI_PROVIDER_DEFAULT_MODEL: Record<AiProvider, string> = {
   // Text-01 is overkill for short WhatsApp replies; switch via the model
   // input if you need deeper reasoning.
   minimax: 'MiniMax-M2',
+  // OpenRouter addresses models as `provider/model`; gpt-5.4-mini is
+  // the same cheap/fast default the OpenAI provider uses.
+  openrouter: 'openai/gpt-5.4-mini',
 };
 
 /**

@@ -9,6 +9,7 @@ import { HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults';
 import { generateOpenAi } from './providers/openai';
 import { generateAnthropic } from './providers/anthropic';
 import { generateMiniMax } from './providers/minimax';
+import { generateOpenRouter } from './providers/openrouter';
 
 export interface GenerateArgs {
   config: AiConfig;
@@ -46,6 +47,9 @@ export async function generateReply(
       break;
     case 'minimax':
       result = await generateMiniMax(providerArgs);
+      break;
+    case 'openrouter':
+      result = await generateOpenRouter(providerArgs);
       break;
     default:
       throw new AiError(`Unsupported AI provider: ${config.provider}`, {

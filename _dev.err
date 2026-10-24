@@ -1,1 +1,47 @@
 ⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+Error: fetch failed
+    at context.fetch (C:\dev\wacrm\node_modules\next\dist\server\web\sandbox\context.js:321:60)
+    at C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_@supabase_auth-js_dist_module_0focj3n._.js:600:23
+    at _handleRequest (C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_@supabase_auth-js_dist_module_0focj3n._.js:989:24)
+    at _request (C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_@supabase_auth-js_dist_module_0focj3n._.js:976:24)
+    at C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_@supabase_auth-js_dist_module_0focj3n._.js:6404:225
+    at SupabaseAuthClient._useSession (C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_@supabase_auth-js_dist_module_0focj3n._.js:6173:26)
+    at async SupabaseAuthClient._getUser (C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_@supabase_auth-js_dist_module_0focj3n._.js:6389:20)
+    at async SupabaseAuthClient.getUser (C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_@supabase_auth-js_dist_module_0focj3n._.js:6373:22)
+    at async middleware (C:\dev\wacrm\.next\dev\server\edge\chunks\[root-of-the-server]__13jvavz._.js:46:32)
+    at async C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_next_dist_05lqd51._.js:19145:20
+    at async C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_next_dist_05lqd51._.js:7853:28
+    at async adapter (C:\dev\wacrm\.next\dev\server\edge\chunks\node_modules_next_dist_05lqd51._.js:7807:16)
+    at async C:\dev\wacrm\node_modules\next\dist\server\web\sandbox\sandbox.js:115:26
+    at async runWithTaggedErrors (C:\dev\wacrm\node_modules\next\dist\server\web\sandbox\sandbox.js:112:9)
+    at async DevServer.runMiddleware (C:\dev\wacrm\node_modules\next\dist\server\next-server.js:1207:22)
+    at async DevServer.runMiddleware (C:\dev\wacrm\node_modules\next\dist\server\dev\next-dev-server.js:278:28)
+    at async NextNodeServer.handleCatchallMiddlewareRequest (C:\dev\wacrm\node_modules\next\dist\server\next-server.js:392:26)
+    at async DevServer.handleRequestImpl (C:\dev\wacrm\node_modules\next\dist\server\base-server.js:941:28)
+    at async C:\dev\wacrm\node_modules\next\dist\server\dev\next-dev-server.js:394:20
+    at async Span.traceAsyncFn (C:\dev\wacrm\node_modules\next\dist\trace\trace.js:164:20)
+    at async DevServer.handleRequest (C:\dev\wacrm\node_modules\next\dist\server\dev\next-dev-server.js:390:24)
+    at async handleRoute (C:\dev\wacrm\node_modules\next\dist\server\lib\router-utils\resolve-routes.js:366:33)
+    at async resolveRoutes (C:\dev\wacrm\node_modules\next\dist\server\lib\router-utils\resolve-routes.js:622:28)
+    at async handleRequest (C:\dev\wacrm\node_modules\next\dist\server\lib\router-server.js:314:96)
+    at async requestHandlerImpl (C:\dev\wacrm\node_modules\next\dist\server\lib\router-server.js:514:13)
+    at async Server.requestListener (C:\dev\wacrm\node_modules\next\dist\server\lib\start-server.js:225:13) {
+  
+}
+TypeError: fetch failed
+    at async POST (src\app\api\push\dispatch-pending\route.ts:29:7)
+  27 |   const {
+  28 |     data: { user },
+> 29 |   } = await serverSupabase.auth.getUser();
+     |       ^
+  30 |   if (!user) {
+  31 |     return NextResponse.json(
+  32 |       { ok: false, error: 'Unauthorized' }, {
+  [cause]: Error: getaddrinfo ENOTFOUND dugvwdvxgiyzwbyywlmu.supabase.co
+      at ignore-listed frames {
+    errno: -3008,
+    code: 'ENOTFOUND',
+    syscall: 'getaddrinfo',
+    hostname: 'dugvwdvxgiyzwbyywlmu.supabase.co'
+  }
+}

@@ -49,6 +49,7 @@ const PROVIDER_LABEL: Record<AiProvider, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic (Claude)',
   minimax: 'MiniMax',
+  openrouter: 'OpenRouter',
 };
 
 const KEY_PLACEHOLDER: Record<AiProvider, string> = {
@@ -56,6 +57,7 @@ const KEY_PLACEHOLDER: Record<AiProvider, string> = {
   anthropic: 'sk-ant-...',
   // MiniMax issues opaque API keys with no standard prefix.
   minimax: 'Paste your MiniMax API key',
+  openrouter: 'sk-or-v1-...',
 };
 
 export function AiConfig() {
@@ -139,9 +141,7 @@ export function AiConfig() {
   const handleProviderChange = (next: AiProvider) => {
     setProvider(next);
     const isDefaultModel =
-      model === AI_PROVIDER_DEFAULT_MODEL.openai ||
-      model === AI_PROVIDER_DEFAULT_MODEL.anthropic ||
-      model === AI_PROVIDER_DEFAULT_MODEL.minimax ||
+      Object.values(AI_PROVIDER_DEFAULT_MODEL).includes(model) ||
       model.trim() === '';
     if (isDefaultModel) setModel(AI_PROVIDER_DEFAULT_MODEL[next]);
   };
@@ -293,6 +293,9 @@ export function AiConfig() {
                     </SelectItem>
                     <SelectItem value="minimax">
                       {PROVIDER_LABEL.minimax}
+                    </SelectItem>
+                    <SelectItem value="openrouter">
+                      {PROVIDER_LABEL.openrouter}
                     </SelectItem>
                   </SelectContent>
                 </Select>

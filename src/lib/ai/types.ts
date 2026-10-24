@@ -6,7 +6,16 @@
 // whether the account is on OpenAI or Anthropic.
 // ============================================================
 
-export type AiProvider = 'openai' | 'anthropic' | 'minimax';
+/** Every provider the account may pick. Single source of truth for the
+ *  type, the runtime allow-list in the API routes, and the settings UI. */
+export const AI_PROVIDERS = [
+  'openai',
+  'anthropic',
+  'minimax',
+  'openrouter',
+] as const;
+
+export type AiProvider = (typeof AI_PROVIDERS)[number];
 
 /**
  * Account AI setup, decrypted and ready to use. Produced by

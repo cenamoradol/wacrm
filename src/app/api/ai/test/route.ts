@@ -7,7 +7,7 @@ import {
 } from '@/lib/rate-limit';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { validateAiCredentials } from '@/lib/ai/validate';
-import { AiError, type AiProvider } from '@/lib/ai/types';
+import { AiError, AI_PROVIDERS, type AiProvider } from '@/lib/ai/types';
 
 /**
  * POST /api/ai/test  (admin+)
@@ -34,13 +34,9 @@ export async function POST(request: Request) {
     }
 
     const provider = body.provider as AiProvider;
-    if (
-      provider !== 'openai' &&
-      provider !== 'anthropic' &&
-      provider !== 'minimax'
-    ) {
+    if (!AI_PROVIDERS.includes(provider)) {
       return NextResponse.json(
-        { error: 'provider must be "openai", "anthropic", or "minimax"' },
+        { error: `provider must be one of: ${AI_PROVIDERS.join(', ')}` },
         { status: 400 }
       );
     }
