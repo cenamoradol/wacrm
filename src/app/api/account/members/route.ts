@@ -10,12 +10,29 @@
 //   admin+. Agents and viewers see name + avatar + role + joined
 //   date only. This mirrors the design decision from the planning
 //   phase: "agent/viewer sees names only".
+//
+// POST /api/account/members
+//
+// Admin+ provisions a member's login directly: the auth user is
+// created already confirmed (no confirmation email, no invite link)
+// and attached to the account with the given role. See
+// `src/lib/auth/members.ts`.
 // ============================================================
 
 import { NextResponse } from 'next/server';
 
-import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
+import {
+  getCurrentAccount,
+  requireRole,
+  toErrorResponse,
+} from '@/lib/auth/account';
 import { canManageMembers, isAccountRole } from '@/lib/auth/roles';
+import { createMemberAccount, MemberError } from '@/lib/auth/members';
+import {
+  checkRateLimit,
+  rateLimitResponse,
+  RATE_LIMITS,
+} from '@/lib/rate-limit';
 import type { AccountMember } from '@/types';
 
 interface ProfileRow {
@@ -67,6 +84,71 @@ export async function GET() {
     });
 
     return NextResponse.json({ members });
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+}
+
+/**
+ * POST /api/account/members  (admin+)
+ *
+ * Create a member's login directly — no invite link, no email
+ * confirmation. The teammate gets the credentials the admin types
+ * here and can sign in immediately.
+ */
+export async function POST(request: Request) {
+  try {
+    const ctx = await requireRole('admin');
+
+    const limit = checkRateLimit(
+      `admin:memberCreate:${ctx.userId}`,
+      RATE_LIMITS.adminAction
+    );
+    if (!limit.success) return rateLimitResponse(limit);
+
+    const body = (await request.json().catch(() => null)) as {
+      email?: unknown;
+      password?: unknown;
+      role?: unknown;
+      fullName?: unknown;
+    } | null;
+
+    const role = body?.role;
+    if (!isAccountRole(role) || role === 'owner') {
+      return NextResponse.json(
+        { error: "'role' must be one of admin, agent, viewer" },
+        { status: 400 }
+      );
+    }
+
+    const email = typeof body?.email === 'string' ? body.email : '';
+    const password = typeof body?.password === 'string' ? body.password : '';
+    const fullName =
+      typeof body?.fullName === 'string' ? body.fullName.trim() : '';
+
+    try {
+      const member = await createMemberAccount({
+        supabase: ctx.supabase,
+        accountId: ctx.accountId,
+        email,
+        password,
+        role,
+        fullName,
+      });
+      return NextResponse.json({ ok: true, member }, { status: 201 });
+    } catch (err) {
+      if (err instanceof MemberError) {
+        return NextResponse.json(
+          { error: err.message, code: err.code },
+          { status: err.status }
+        );
+      }
+      console.error('[POST /api/account/members] error:', err);
+      return NextResponse.json(
+        { error: 'Failed to add the member' },
+        { status: 500 }
+      );
+    }
   } catch (err) {
     return toErrorResponse(err);
   }

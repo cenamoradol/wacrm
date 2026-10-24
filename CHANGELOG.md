@@ -21,9 +21,25 @@ exactly as before — push is opt-in per device, opt-out is one click in
 > See `docs/push-notifications.md` for the full setup, including the
 > `ALTER DATABASE … SET app.onesignal_*` steps that store the credentials
 > the trigger reads at dispatch time.
+>
+> Also apply `supabase/migrations/063_openrouter_provider.sql` (adds
+> `'openrouter'` to the AI provider allow-list) and
+> `supabase/migrations/064_direct_member_creation.sql` (adds the
+> `add_account_member` RPC used by the new member-management flow).
 
 ### Added
 
+- **Admin-managed member logins.** An owner/admin can now create a
+  teammate's account directly from **Settings → Members → Add member**
+  (email + password + role) — the login is confirmed on the spot, no
+  email confirmation and no invite link — and later correct a
+  teammate's email or reset their password with the pencil button on
+  the roster row. Handy when the agent never gets access to that
+  mailbox. The account owner's own credentials stay off-limits (they
+  manage those from **Settings → Profile**).
+- **OpenRouter as an AI provider.** Pick it in **Settings → AI
+  Assistant** and bring your own OpenRouter key; models are addressed
+  as `provider/model` (default `openai/gpt-5.4-mini`).
 - **OneSignal Web Push integration.** When a conversation is assigned,
   the assigned teammate gets a native browser push on every device
   they're signed in on — even with the CRM tab closed. `OneSignal.login(user.id)`

@@ -1,11 +1,20 @@
 // ============================================================
 // /api/account/members/[userId]
 //
-//   PATCH  — change a member's role.   Admin+.
+//   PATCH  — change a member's role, and/or their email / password.
+//             Admin+.
 //   DELETE — remove a member.          Admin+.
 //
-// Both delegate to SECURITY DEFINER RPCs from migration 018:
+// The role change delegates to the SECURITY DEFINER RPC from
+// migration 018:
 //   - set_member_role(p_user_id, p_new_role)
+//
+// The credential change (email / password) goes through the service
+// role — `auth.admin.updateUserById` is the only way to write
+// another user's login. See `src/lib/auth/members.ts`.
+//
+// The removal delegates to the SECURITY DEFINER RPC from
+// migration 018:
 //   - remove_account_member(p_user_id)
 //
 // The RPCs do the *real* authorisation work — caller must be
@@ -19,6 +28,7 @@ import type { PostgrestError } from '@supabase/supabase-js';
 
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { isAccountRole } from '@/lib/auth/roles';
+import { MemberError, updateMemberLogin } from '@/lib/auth/members';
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -50,7 +60,7 @@ export async function PATCH(
     const ctx = await requireRole('admin');
 
     const limit = checkRateLimit(
-      `admin:memberRole:${ctx.userId}`,
+      `admin:memberUpdate:${ctx.userId}`,
       RATE_LIMITS.adminAction
     );
     if (!limit.success) return rateLimitResponse(limit);
@@ -59,34 +69,74 @@ export async function PATCH(
 
     const body = (await request.json().catch(() => null)) as {
       role?: unknown;
+      email?: unknown;
+      password?: unknown;
     } | null;
-    const role = body?.role;
 
-    if (!isAccountRole(role)) {
+    const wantsRole = body?.role !== undefined;
+    const email = typeof body?.email === 'string' ? body.email : undefined;
+    const password =
+      typeof body?.password === 'string' ? body.password : undefined;
+
+    if (!wantsRole && email === undefined && password === undefined) {
       return NextResponse.json(
-        { error: "'role' must be one of owner, admin, agent, viewer" },
+        { error: "Provide 'role', 'email' or 'password'" },
         { status: 400 }
       );
     }
 
-    // The RPC blocks promotion to / demotion from owner, but
-    // surface the friendlier 400 before crossing the wire too.
-    if (role === 'owner') {
-      return NextResponse.json(
-        {
-          error:
-            'Use POST /api/account/transfer-ownership to promote a member to owner',
-        },
-        { status: 400 }
-      );
+    if (wantsRole) {
+      const role = body?.role;
+      if (!isAccountRole(role)) {
+        return NextResponse.json(
+          { error: "'role' must be one of owner, admin, agent, viewer" },
+          { status: 400 }
+        );
+      }
+
+      // The RPC blocks promotion to / demotion from owner, but
+      // surface the friendlier 400 before crossing the wire too.
+      if (role === 'owner') {
+        return NextResponse.json(
+          {
+            error:
+              'Use POST /api/account/transfer-ownership to promote a member to owner',
+          },
+          { status: 400 }
+        );
+      }
+
+      const { error } = await ctx.supabase.rpc('set_member_role', {
+        p_user_id: userId,
+        p_new_role: role,
+      });
+
+      if (error) return rpcErrorToResponse(error);
     }
 
-    const { error } = await ctx.supabase.rpc('set_member_role', {
-      p_user_id: userId,
-      p_new_role: role,
-    });
-
-    if (error) return rpcErrorToResponse(error);
+    if (email !== undefined || password !== undefined) {
+      try {
+        await updateMemberLogin({
+          supabase: ctx.supabase,
+          accountId: ctx.accountId,
+          userId,
+          email,
+          password,
+        });
+      } catch (err) {
+        if (err instanceof MemberError) {
+          return NextResponse.json(
+            { error: err.message, code: err.code },
+            { status: err.status }
+          );
+        }
+        console.error('[members route] credential update error:', err);
+        return NextResponse.json(
+          { error: 'Failed to update the login details' },
+          { status: 500 }
+        );
+      }
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {

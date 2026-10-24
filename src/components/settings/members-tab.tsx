@@ -28,8 +28,10 @@ import {
   Loader2,
   Mail,
   MailX,
+  Pencil,
   Plus,
   Trash2,
+  UserPlus,
   UsersRound,
 } from 'lucide-react';
 
@@ -73,6 +75,8 @@ import {
   PresenceDot,
 } from '@/components/presence/presence-dot';
 import { InviteMemberDialog } from './invite-member-dialog';
+import { AddMemberDialog } from './add-member-dialog';
+import { EditMemberDialog } from './edit-member-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
 
@@ -138,6 +142,8 @@ export function MembersTab() {
   const [loading, setLoading] = useState(true);
 
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null
@@ -297,10 +303,18 @@ export function MembersTab() {
         description={t('description')}
         action={
           <RequireRole min="admin">
-            <Button onClick={() => setInviteOpen(true)}>
-              <Plus className="size-4" />
-              {t('inviteMember')}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Direct create — the teammate gets a confirmed login
+                  without an email round-trip. */}
+              <Button variant="outline" onClick={() => setAddMemberOpen(true)}>
+                <UserPlus className="size-4" />
+                {t('addMember')}
+              </Button>
+              <Button onClick={() => setInviteOpen(true)}>
+                <Plus className="size-4" />
+                {t('inviteMember')}
+              </Button>
+            </div>
           </RequireRole>
         }
       />
@@ -457,6 +471,26 @@ export function MembersTab() {
                       </span>
                     )}
 
+                    {/* Edit login details (email / password). Admin+
+                        only; never on the owner row — their credentials
+                        are the account's root of trust — and never on
+                        yourself (Settings → Profile covers your own
+                        login). */}
+                    {canManageMembers && !isOwnerRow && !isSelf && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setEditingMember(member)}
+                        disabled={isBusy}
+                        aria-label={t('editLoginAria', {
+                          name: member.full_name || member.email || '',
+                        })}
+                        className="border-border text-muted-foreground hover:bg-muted"
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                    )}
+
                     {/* Remove. Admin+ only; never on the owner row;
                         never on yourself. Pre-polish styling was
                         neutral-default + red-on-hover — the
@@ -577,6 +611,20 @@ export function MembersTab() {
         open={inviteOpen}
         onOpenChange={setInviteOpen}
         onCreated={loadEverything}
+      />
+
+      <AddMemberDialog
+        open={addMemberOpen}
+        onOpenChange={setAddMemberOpen}
+        onCreated={loadEverything}
+      />
+
+      <EditMemberDialog
+        member={editingMember}
+        onOpenChange={(open) => {
+          if (!open) setEditingMember(null);
+        }}
+        onSaved={loadEverything}
       />
 
       <Dialog
