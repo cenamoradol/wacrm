@@ -16,6 +16,13 @@ const h = vi.hoisted(() => ({
     upsertCalls: [] as { table: string; payload: unknown }[],
     logInserts: [] as Record<string, unknown>[],
     logUpdates: [] as Record<string, unknown>[],
+    /** Team members the round-robin picker can choose from. */
+    profiles: [] as Record<string, unknown>[],
+    /** Conversations already carrying an assignee (rotation load). */
+    conversations: [] as Record<string, unknown>[],
+    /** Rows the round-robin assignment UPDATE lands on. Empty means
+     *  "already owned by a human" — the rotation must not steal it. */
+    assignedConversations: [] as Record<string, unknown>[],
   },
 }));
 
@@ -36,6 +43,22 @@ vi.mock('./admin-client', () => {
       }
       // ownership guard / condition read
       return { data: state.owned, error: null };
+    }
+    if (table === 'profiles') {
+      // Round-robin candidate pool.
+      return { data: state.profiles, error: null };
+    }
+    if (table === 'member_presence') {
+      return { data: [], error: null };
+    }
+    if (table === 'conversations') {
+      // The rotation reads the assigned conversations to rank the load;
+      // the assignment itself is an UPDATE whose result tells the step
+      // whether the row was still unowned.
+      if (type === 'update') {
+        return { data: state.assignedConversations, error: null };
+      }
+      return { data: state.conversations, error: null };
     }
     if (table === 'custom_fields') {
       // account-scoped ownership lookup for a custom field definition
@@ -104,10 +127,18 @@ vi.mock('./admin-client', () => {
       eq: (k: string, v: unknown) => (ops.filters.push(['eq', k, v]), b),
       gte: (k: string, v: unknown) => (ops.filters.push(['gte', k, v]), b),
       is: (k: string, v: unknown) => (ops.filters.push(['is', k, v]), b),
+      not: () => b,
       order: () => b,
       limit: () => b,
       single: () => Promise.resolve(resolve(ops)),
-      maybeSingle: () => Promise.resolve(resolve(ops)),
+      // Supabase's maybeSingle resolves to ONE row, not an array — the
+      // mock returns whatever `resolve()` gave, so unwrap it here.
+      maybeSingle: () => {
+        const r = resolve(ops);
+        return Promise.resolve(
+          Array.isArray(r.data) ? { ...r, data: r.data[0] ?? null } : r
+        );
+      },
       then: (onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) =>
         Promise.resolve(resolve(ops)).then(onF, onR),
     };
@@ -191,6 +222,9 @@ beforeEach(() => {
   h.state.upsertCalls = [];
   h.state.logInserts = [];
   h.state.logUpdates = [];
+  h.state.profiles = [];
+  h.state.conversations = [];
+  h.state.assignedConversations = [];
 });
 
 describe('runAutomationsForTrigger — tenant isolation', () => {
@@ -1859,6 +1893,178 @@ describe('runAutomationsForTrigger � messagesSent counter', () => {
       },
     });
     expect(result.messagesSent).toBe(5);
+  });
+});
+
+// ============================================================
+// assign_conversation (round-robin) — the agent introduces
+// themselves to the customer as soon as they take the thread.
+// ============================================================
+describe('assign_conversation — round-robin intro message', () => {
+  beforeEach(() => {
+    vi.mocked(engineSendText).mockClear();
+    vi.mocked(engineSendText).mockResolvedValue({
+      whatsapp_message_id: 'm1',
+    });
+    h.state.owned = { id: 'c1' };
+    h.state.profiles = [
+      { user_id: 'u2', full_name: 'Ana López', account_role: 'agent' },
+    ];
+    // The UPDATE lands on one row → the conversation was unowned and
+    // the rotation took it.
+    h.state.assignedConversations = [{ id: 'conv-1' }];
+    h.state.automations = [
+      {
+        id: 'a1',
+        account_id: ACCOUNT,
+        user_id: 'u1',
+        name: 'assign',
+        trigger_type: 'new_message_received',
+        trigger_config: {},
+        is_active: true,
+      },
+    ];
+  });
+
+  function setupAssign(stepConfig: Record<string, unknown>) {
+    h.state.steps = [
+      {
+        id: 's1',
+        automation_id: 'a1',
+        step_type: 'assign_conversation',
+        position: 0,
+        parent_step_id: null,
+        step_config: stepConfig,
+      },
+    ];
+    return runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'c1',
+      context: {
+        message_text: 'hola',
+        conversation_id: 'conv-1',
+        vars: {},
+      },
+    });
+  }
+
+  /** Step details the engine wrote to the automation log. */
+  function stepDetails(): string[] {
+    return h.state.logUpdates
+      .flatMap((u) => (u.steps_executed ?? []) as Array<{ detail: string }>)
+      .map((s) => s.detail);
+  }
+
+  it('greets the customer with the assigned agent name', async () => {
+    const result = await setupAssign({
+      mode: 'round_robin',
+      intro_message: 'Hola soy {{ agent.first_name }}, yo te estaré atendiendo',
+    });
+
+    expect(vi.mocked(engineSendText)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(engineSendText).mock.calls[0][0]).toMatchObject({
+      text: 'Hola soy Ana, yo te estaré atendiendo',
+      conversationId: 'conv-1',
+      contactId: 'c1',
+      // Attributed to the agent who took the thread, not to the bot.
+      senderId: 'u2',
+    });
+    // Counts as a reply so the AI auto-reply stays out of the way.
+    expect(result.messagesSent).toBe(1);
+    // The log says the greeting went out — otherwise a run that sent
+    // nothing looks the same as one that did.
+    expect(stepDetails().some((d) => d.includes('greeting sent'))).toBe(true);
+  });
+
+  it('renders {{ agent.name }} with the full name', async () => {
+    await setupAssign({
+      mode: 'round_robin',
+      intro_message: 'Hola soy {{ agent.name }}, ¿en qué te ayudo?',
+    });
+
+    expect(vi.mocked(engineSendText).mock.calls[0][0]).toMatchObject({
+      text: 'Hola soy Ana López, ¿en qué te ayudo?',
+    });
+  });
+
+  it('does not greet when the conversation already had an owner', async () => {
+    h.state.assignedConversations = [];
+    await setupAssign({
+      mode: 'round_robin',
+      intro_message: 'Hola soy {{ agent.first_name }}',
+    });
+
+    expect(vi.mocked(engineSendText)).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing when no intro message is configured', async () => {
+    await setupAssign({ mode: 'round_robin' });
+
+    expect(vi.mocked(engineSendText)).not.toHaveBeenCalled();
+    expect(stepDetails().some((d) => d.includes('greeting sent'))).toBe(false);
+  });
+});
+
+// ============================================================
+// A conversation owned by a human is the agent's: no automation
+// may keep texting the customer behind their back.
+// ============================================================
+describe('send steps — conversation owned by an agent', () => {
+  beforeEach(() => {
+    vi.mocked(engineSendText).mockClear();
+    vi.mocked(engineSendText).mockResolvedValue({
+      whatsapp_message_id: 'm1',
+    });
+    h.state.owned = { id: 'c1' };
+    h.state.automations = [
+      {
+        id: 'a1',
+        account_id: ACCOUNT,
+        user_id: 'u1',
+        name: 'reply',
+        trigger_type: 'new_message_received',
+        trigger_config: {},
+        is_active: true,
+      },
+    ];
+  });
+
+  function setupSendMessage() {
+    h.state.steps = [
+      {
+        id: 's1',
+        automation_id: 'a1',
+        step_type: 'send_message',
+        position: 0,
+        parent_step_id: null,
+        step_config: { text: 'Hola {{ message.text }}' },
+      },
+    ];
+    return runAutomationsForTrigger({
+      accountId: ACCOUNT,
+      triggerType: 'new_message_received',
+      contactId: 'c1',
+      context: {
+        message_text: 'tienes toyotas?',
+        conversation_id: 'conv-1',
+        vars: {},
+      },
+    });
+  }
+
+  it('skips the send when a human owns the conversation', async () => {
+    h.state.conversations = [{ id: 'conv-1', assigned_agent_id: 'u9' }];
+    await setupSendMessage();
+
+    expect(vi.mocked(engineSendText)).not.toHaveBeenCalled();
+  });
+
+  it('still sends when nobody owns the conversation', async () => {
+    h.state.conversations = [{ id: 'conv-1', assigned_agent_id: null }];
+    await setupSendMessage();
+
+    expect(vi.mocked(engineSendText)).toHaveBeenCalledTimes(1);
   });
 });
 

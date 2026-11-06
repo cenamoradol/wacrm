@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
+import { useCan } from '@/hooks/use-can';
 import { usePresence } from '@/hooks/use-presence';
 import { PresenceDot } from '@/components/presence/presence-dot';
 import { presenceLabel } from '@/lib/presence';
@@ -27,10 +28,24 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  MoreHorizontal,
+  Archive,
+  ArchiveRestore,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import { format, isToday, isYesterday, differenceInHours } from 'date-fns';
 import { useTranslations } from 'next-intl';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -109,6 +124,17 @@ interface MessageThreadProps {
    */
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
+  /**
+   * Fired after the conversation's `archived` flag changed on the server.
+   * The parent keeps its list state in sync and closes the thread when
+   * the conversation leaves the working inbox.
+   */
+  onArchivedChange?: (conversationId: string, archived: boolean) => void;
+  /**
+   * Fired after the conversation row was deleted (chat + history gone).
+   * The parent drops it from the list and closes the thread.
+   */
+  onDeleted?: (conversationId: string) => void;
 }
 
 function formatDateSeparator(
@@ -174,6 +200,8 @@ export function MessageThread({
   onRefresh,
   contactPanelOpen,
   onToggleContactPanel,
+  onArchivedChange,
+  onDeleted,
 }: MessageThreadProps) {
   const t = useTranslations('Inbox.messageThread');
   const tTimer = useTranslations('Inbox.sessionTimer');
@@ -181,6 +209,13 @@ export function MessageThread({
   const tBubble = useTranslations('Inbox.bubble');
 
   const { user } = useAuth();
+  // Archiving / deleting a conversation is an operational write — the
+  // same `agent+` bar the `conversations` UPDATE / DELETE RLS policies
+  // enforce. Viewers get no menu at all.
+  const canManageConversations = useCan('manage-conversations');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -861,6 +896,48 @@ export function MessageThread({
     [conversation, onAssignChange]
   );
 
+  // Archive / unarchive: the chat and its history stay put, the thread
+  // just leaves the working inbox so it isn't buried under old chats.
+  const handleArchiveToggle = useCallback(async () => {
+    if (!conversation) return;
+    const next = !(conversation.archived ?? false);
+    setArchiving(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from('conversations')
+      .update({ archived: next })
+      .eq('id', conversation.id);
+    setArchiving(false);
+    if (error) {
+      console.error('Failed to update archived flag:', error);
+      toast.error(t('archiveFailed'));
+      return;
+    }
+    onArchivedChange?.(conversation.id, next);
+    toast.success(next ? t('archived') : t('unarchived'));
+  }, [conversation, onArchivedChange, t]);
+
+  // Delete: permanent. The row's children (messages, reactions, message
+  // actions, notifications) cascade in the DB.
+  const handleDelete = useCallback(async () => {
+    if (!conversation) return;
+    setDeleting(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('id', conversation.id);
+    setDeleting(false);
+    if (error) {
+      console.error('Failed to delete conversation:', error);
+      toast.error(t('deleteFailed'));
+      return;
+    }
+    setDeleteOpen(false);
+    onDeleted?.(conversation.id);
+    toast.success(t('deleted'));
+  }, [conversation, onDeleted, t]);
+
   // Empty state — same WhatsApp-style doodle background as the active
   // thread below, so swapping between empty/selected doesn't change the
   // pattern under the user's eye.
@@ -1091,6 +1168,46 @@ export function MessageThread({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* More actions — archive the thread out of the inbox, or
+              delete the chat and its history for good. */}
+          {canManageConversations && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label={t('moreActions')}
+                title={t('moreActions')}
+                className="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="border-border bg-popover"
+              >
+                <DropdownMenuItem
+                  onClick={handleArchiveToggle}
+                  disabled={archiving}
+                  className="text-popover-foreground text-sm"
+                >
+                  {conversation.archived ? (
+                    <ArchiveRestore className="h-4 w-4" />
+                  ) : (
+                    <Archive className="h-4 w-4" />
+                  )}
+                  {conversation.archived ? t('unarchive') : t('archive')}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-border" />
+                <DropdownMenuItem
+                  onClick={() => setDeleteOpen(true)}
+                  variant="destructive"
+                  className="text-sm"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {t('delete')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -1206,6 +1323,37 @@ export function MessageThread({
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
       />
+
+      {/* Delete confirmation — this one is irreversible. */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-popover-foreground">
+              {t('deleteTitle')}
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              {t('deleteDescription', { name: displayName })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="bg-popover border-border">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
+              {t('deleteConfirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

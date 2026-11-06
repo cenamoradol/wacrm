@@ -5,7 +5,9 @@ import { createClient } from '@/lib/supabase/client';
 import {
   CONVERSATION_SELECT,
   matchesContactFilters,
+  matchesInboxFilter,
   normalizeConversations,
+  type InboxFilter,
 } from '@/lib/inbox/conversations';
 import { cn } from '@/lib/utils';
 import type { Conversation, ConversationStatus, Tag } from '@/types';
@@ -42,8 +44,6 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
   closed: 'bg-muted-foreground',
 };
 
-type InboxFilter = ConversationStatus | 'all' | 'unread';
-
 export function ConversationList({
   activeConversationId,
   onSelect,
@@ -60,6 +60,7 @@ export function ConversationList({
       { label: t('filterOpen'), value: 'open' },
       { label: t('filterPending'), value: 'pending' },
       { label: t('filterClosed'), value: 'closed' },
+      { label: t('filterArchived'), value: 'archived' },
     ],
     [t]
   );
@@ -160,13 +161,9 @@ export function ConversationList({
   }, [tags]);
 
   const filtered = useMemo(() => {
-    let result = conversations;
-
-    if (filter === 'unread') {
-      result = result.filter((c) => c.unread_count > 0);
-    } else if (filter !== 'all') {
-      result = result.filter((c) => c.status === filter);
-    }
+    // Archived threads are hidden from every live filter — the dedicated
+    // `archived` filter is the only view that surfaces them.
+    let result = conversations.filter((c) => matchesInboxFilter(c, filter));
 
     // Contact-based filters (tags via OR logic, exact company match).
     if (selectedTagIds.length > 0 || selectedCompany !== null) {
@@ -225,7 +222,13 @@ export function ConversationList({
     // w-full on mobile so the list occupies the whole viewport when it's
     // the single pane showing; fixed 320px on desktop where it shares the
     // row with the thread + contact sidebar.
-    <div className="border-border bg-card flex h-full w-full flex-col border-r lg:w-80">
+    //
+    // `min-w-0` is load-bearing: as a flex item the default
+    // `min-width: auto` resolves to the min-content width, and the rows
+    // below truncate the message preview with `white-space: nowrap` —
+    // one long preview pushed this panel to ~1650px wide, so on a phone
+    // the right-hand side (unread badge, timestamp) was clipped away.
+    <div className="border-border bg-card flex h-full w-full min-w-0 flex-col border-r lg:w-80">
       {/* Search + Filter */}
       <div className="border-border space-y-2 border-b p-3">
         <div className="relative">

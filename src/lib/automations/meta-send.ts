@@ -42,6 +42,12 @@ interface SendTextArgs {
   conversationId: string;
   contactId: string;
   text: string;
+  /**
+   * Attribute the message to this agent (sender_type='agent') instead
+   * of the generic 'bot'. Used by the round-robin assignment greeting,
+   * where the customer is greeted by the agent who just took over.
+   */
+  senderId?: string;
 }
 
 interface SendTemplateArgs {
@@ -414,14 +420,18 @@ async function sendViaMeta(
 
   // Persist the sent message so it appears in the inbox with a real
   // Meta message id. sender_type='bot' distinguishes automation sends
-  // from manual agent sends.
+  // from manual agent sends — unless the caller attributed the message
+  // to an agent (the round-robin greeting), which is stored as an
+  // agent message with the agent's id.
   const content_type = input.kind === 'template' ? 'template' : 'text';
   const content_text = input.kind === 'text' ? input.text : null;
   const template_name = input.kind === 'template' ? input.templateName : null;
+  const senderId = input.kind === 'text' ? input.senderId : undefined;
 
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: input.conversationId,
-    sender_type: 'bot',
+    sender_type: senderId ? 'agent' : 'bot',
+    sender_id: senderId ?? null,
     content_type,
     content_text,
     template_name,

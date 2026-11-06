@@ -18,12 +18,15 @@ import {
  */
 export interface OpenAiCompatibleArgs extends ProviderArgs {
   baseUrl: string;
+  /** Name used in error messages. Defaults to 'OpenAI-compatible'. */
+  providerName?: string;
 }
 
 export async function openAiCompatibleChat(
   args: OpenAiCompatibleArgs
 ): Promise<ProviderResult> {
   const { apiKey, model, systemPrompt, messages, timeoutMs, baseUrl } = args;
+  const providerName = args.providerName ?? 'OpenAI-compatible';
 
   let res: Response;
   try {
@@ -48,21 +51,43 @@ export async function openAiCompatibleChat(
   }
 
   if (!res.ok) {
-    throw await providerHttpError('OpenAI-compatible', res);
+    throw await providerHttpError(providerName, res);
   }
 
   const data = (await res.json().catch(() => null)) as {
-    choices?: { message?: { content?: string } }[];
+    choices?: { message?: { content?: string }; finish_reason?: string }[];
     usage?: {
       prompt_tokens?: number;
       completion_tokens?: number;
       total_tokens?: number;
     };
+    base_resp?: { status_code?: number; status_msg?: string };
   } | null;
-  const text = data?.choices?.[0]?.message?.content;
-  if (!text || typeof text !== 'string' || !text.trim()) {
+
+  // MiniMax reports some failures with HTTP 200 and a non-zero
+  // base_resp.status_code. Without this check they surface as an
+  // "empty response" and the real reason never reaches the user.
+  const baseCode = data?.base_resp?.status_code;
+  if (typeof baseCode === 'number' && baseCode !== 0) {
     throw new AiError(
-      'OpenAI-compatible provider returned an empty response.',
+      `${providerName} error ${baseCode}: ${
+        data?.base_resp?.status_msg || 'unknown error'
+      }`,
+      { code: 'provider_error' }
+    );
+  }
+
+  const choice = data?.choices?.[0];
+  const text = choice?.message?.content;
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    // MiniMax's reasoning models spend part of the output budget on
+    // `reasoning_content`; when the cap is hit first the reply comes back
+    // empty. Name the cause instead of a bare "empty response".
+    const reason = choice?.finish_reason;
+    throw new AiError(
+      reason === 'length'
+        ? `${providerName} returned no text — the output-token cap was hit before the reply was written (finish_reason: length). Raise the output-token cap.`
+        : `${providerName} returned an empty response.`,
       {
         code: 'empty_response',
       }

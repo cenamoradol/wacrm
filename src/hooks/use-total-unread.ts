@@ -15,9 +15,11 @@ import type { Conversation } from '@/types';
 export function useTotalUnread(): number {
   const [total, setTotal] = useState(0);
 
-  // Keep a live local mirror of {id: unread_count} so INSERT/UPDATE/DELETE
-  // events can adjust the total in O(1) without refetching.
-  const countsRef = useRef<Map<string, number>>(new Map());
+  // Keep a live local mirror of {id → unread + archived} so INSERT/
+  // UPDATE/DELETE events can adjust the total in O(1) without refetching.
+  const countsRef = useRef<Map<string, { unread: number; archived: boolean }>>(
+    new Map()
+  );
 
   useEffect(() => {
     const supabase = createClient();
@@ -28,15 +30,21 @@ export function useTotalUnread(): number {
     (async () => {
       const { data, error } = await supabase
         .from('conversations')
-        .select('id, unread_count');
+        .select('id, unread_count, archived');
       if (cancelled || error || !data) return;
 
-      const map = new Map<string, number>();
+      const map = new Map<string, { unread: number; archived: boolean }>();
       let sum = 0;
-      for (const row of data as { id: string; unread_count: number }[]) {
+      for (const row of data as {
+        id: string;
+        unread_count: number;
+        archived?: boolean;
+      }[]) {
         const n = row.unread_count ?? 0;
-        map.set(row.id, n);
-        if (n > 0) sum += 1;
+        const archived = row.archived ?? false;
+        map.set(row.id, { unread: n, archived });
+        // Archived threads live outside the inbox — they don't nag.
+        if (!archived && n > 0) sum += 1;
       }
       countsRef.current = map;
       setTotal(sum);
@@ -54,11 +62,16 @@ export function useTotalUnread(): number {
             if (oldRow.id) map.delete(oldRow.id);
           } else {
             const row = payload.new as Conversation;
-            map.set(row.id, row.unread_count ?? 0);
+            map.set(row.id, {
+              unread: row.unread_count ?? 0,
+              archived: row.archived ?? false,
+            });
           }
           // Recompute — cheap, conversations per user stay small.
           let sum = 0;
-          for (const n of map.values()) if (n > 0) sum += 1;
+          for (const v of map.values()) {
+            if (!v.archived && v.unread > 0) sum += 1;
+          }
           setTotal(sum);
         }
       )

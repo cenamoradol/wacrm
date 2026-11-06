@@ -1,4 +1,4 @@
-import type { Conversation, Contact, Tag } from '@/types';
+import type { Conversation, Contact, ConversationStatus, Tag } from '@/types';
 
 /**
  * Conversation select that embeds the contact plus its tags, so the Inbox
@@ -47,6 +47,33 @@ export interface ContactFilters {
   tagIds: string[];
   /** Exact company match, or null for no company filter. */
   company: string | null;
+}
+
+/**
+ * The inbox list's filter facets. `all` / `unread` / the three statuses
+ * only ever match live conversations — archived threads are visible in
+ * the dedicated `archived` view and nowhere else.
+ */
+export type InboxFilter = ConversationStatus | 'all' | 'unread' | 'archived';
+
+/**
+ * Whether a conversation passes the inbox list's filter facet.
+ *
+ * Archived threads are hidden from every live filter (that's the whole
+ * point of archiving — keeping the working inbox small), and the
+ * `archived` filter is the only way to get them back.
+ */
+export function matchesInboxFilter(
+  conversation: Conversation,
+  filter: InboxFilter
+): boolean {
+  const archived = conversation.archived ?? false;
+
+  if (filter === 'archived') return archived;
+  if (archived) return false;
+  if (filter === 'unread') return conversation.unread_count > 0;
+  if (filter === 'all') return true;
+  return conversation.status === filter;
 }
 
 /**

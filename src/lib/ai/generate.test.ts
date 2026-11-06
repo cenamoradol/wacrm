@@ -217,7 +217,7 @@ describe('generateReply — MiniMax', () => {
       config: config({
         provider: 'minimax',
         apiKey: 'minimax-key',
-        model: 'MiniMax-M2',
+        model: 'MiniMax-M3.1-Flash',
       }),
       systemPrompt: 'sys',
       messages: [{ role: 'user', content: 'Hola' }],
@@ -234,7 +234,7 @@ describe('generateReply — MiniMax', () => {
     expect(opts.headers.Authorization).toBe('Bearer minimax-key');
     expect(opts.headers['Content-Type']).toBe('application/json');
     const body = JSON.parse(opts.body);
-    expect(body.model).toBe('MiniMax-M2');
+    expect(body.model).toBe('MiniMax-M3.1-Flash');
     // System prompt is merged as the first message, same as OpenAI.
     expect(body.messages[0]).toEqual({ role: 'system', content: 'sys' });
     expect(body.messages[1]).toEqual({ role: 'user', content: 'Hola' });
@@ -274,6 +274,55 @@ describe('generateReply — MiniMax', () => {
         messages: [{ role: 'user', content: 'Hi' }],
       })
     ).rejects.toBeInstanceOf(AiError);
+  });
+
+  it('surfaces a base_resp failure reported with HTTP 200', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({
+          base_resp: { status_code: 1002, status_msg: 'insufficient balance' },
+          choices: [{ message: { content: '' } }],
+        })
+      )
+    );
+    await expect(
+      generateReply({
+        config: config({ provider: 'minimax' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      })
+    ).rejects.toMatchObject({
+      code: 'provider_error',
+      message: 'MiniMax error 1002: insufficient balance',
+    });
+  });
+
+  it('names the output-token cap when a reasoning reply comes back empty', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        okResponse({
+          choices: [
+            {
+              message: { content: '', reasoning_content: 'thinking...' },
+              finish_reason: 'length',
+            },
+          ],
+          usage: { completion_tokens_details: { reasoning_tokens: 1024 } },
+        })
+      )
+    );
+    await expect(
+      generateReply({
+        config: config({ provider: 'minimax' }),
+        systemPrompt: 'sys',
+        messages: [{ role: 'user', content: 'Hi' }],
+      })
+    ).rejects.toMatchObject({
+      code: 'empty_response',
+      message: expect.stringContaining('output-token cap'),
+    });
   });
 
   it('parses handoff sentinel from MiniMax output', async () => {

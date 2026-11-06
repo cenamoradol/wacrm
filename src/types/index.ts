@@ -168,6 +168,12 @@ export interface Conversation {
   unread_count: number;
   created_at: string;
   updated_at: string;
+  /**
+   * Archived threads keep their full history but are hidden from the
+   * working inbox (migration 065). A new inbound message un-archives
+   * the conversation so the agent sees it again.
+   */
+  archived?: boolean;
   contact?: Contact;
   /**
    * AI auto-reply state for this thread (migration 029 + 033):
@@ -588,6 +594,23 @@ export interface TagStepConfig {
 export interface AssignConversationStepConfig {
   mode: 'specific' | 'round_robin';
   agent_id?: string;
+  /**
+   * Members eligible for auto-assignment (round-robin mode only).
+   *
+   * Absent = every member who can reply participates (the original
+   * behaviour). An explicit list restricts the rotation to those
+   * members; an empty list means nobody participates and the step
+   * finds no agent.
+   */
+  participant_ids?: string[];
+  /**
+   * Optional greeting sent to the customer right after a round-robin
+   * assignment lands, so the agent can introduce themselves without
+   * typing. Supports `{{ agent.name }}` and `{{ agent.first_name }}`.
+   * Ignored in "specific" mode — that assignment always targets the
+   * same agent, so there is nothing to introduce.
+   */
+  intro_message?: string;
 }
 
 export interface UpdateContactFieldStepConfig {

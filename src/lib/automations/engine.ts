@@ -24,6 +24,7 @@ import type {
   AssignConversationStepConfig,
 } from '@/types';
 import { supabaseAdmin } from './admin-client';
+import { pickAutoAssignAgent } from './auto-assign';
 import { addContactTagIfAbsent } from '@/lib/contacts/tag-write';
 import {
   MAX_TAG_CHAIN_DEPTH,
@@ -211,6 +212,7 @@ export async function resumePendingExecution(pending: {
       logId: pending.log_id,
       triggerEvent: 'resumed_wait',
       messagesSent: 0,
+      assignedInRun: new Set(),
     });
     await markPending(pending.id, 'done');
   } catch (err) {
@@ -273,6 +275,7 @@ async function executeAutomation(
     logId: log.id,
     triggerEvent: input.triggerType,
     messagesSent: 0,
+    assignedInRun: new Set(),
   });
 
   // Atomic counter update via the SQL function from migration 007.
@@ -306,6 +309,16 @@ interface ExecuteArgs {
    *  webhook whether the automation actually replied to the customer
    *  — if so, the webhook suppresses the AI auto-reply. */
   messagesSent: number;
+  /**
+   * Conversations this run just assigned to a human. Sends to those are
+   * allowed even though the thread is now owned — "assign, then greet"
+   * is a legitimate flow — while sends to a conversation a human owned
+   * BEFORE this run are skipped (see `isOwnedByHuman`).
+   *
+   * A Set so every copy of `args` (the branch recursion shallow-copies
+   * it) shares the same one.
+   */
+  assignedInRun?: Set<string>;
 }
 
 async function executeStepsFrom(args: ExecuteArgs): Promise<number> {
@@ -454,6 +467,9 @@ async function runStep(
       const cfg = step.step_config as SendMessageStepConfig;
       if (!args.contactId) throw new Error('send_message needs a contact');
       const conversationId = await resolveConversationId(args);
+      if (await isOwnedByHuman(conversationId, args)) {
+        return 'skipped: conversation is owned by an agent';
+      }
 
       let text: string;
       if (cfg.list_path && cfg.item_template) {
@@ -497,6 +513,9 @@ async function runStep(
       const check = validateInteractivePayload(payload);
       if (!check.ok) throw new Error(check.error);
       const conversationId = await resolveConversationId(args);
+      if (await isOwnedByHuman(conversationId, args)) {
+        return 'skipped: conversation is owned by an agent';
+      }
       const { whatsapp_message_id } = await engineSendInteractive({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
@@ -514,6 +533,9 @@ async function runStep(
       if (!cfg.template_name)
         throw new Error('send_template needs template_name');
       const conversationId = await resolveConversationId(args);
+      if (await isOwnedByHuman(conversationId, args)) {
+        return 'skipped: conversation is owned by an agent';
+      }
       // Meta templates use positional {{1}}, {{2}}, … placeholders, so
       // we MUST emit params in strict numeric order. Lexicographic sort
       // of "1", "2", …, "10" yields "1", "10", "2", … which silently
@@ -601,25 +623,76 @@ async function runStep(
       const cfg = step.step_config as AssignConversationStepConfig;
       if (!args.contactId)
         throw new Error('assign_conversation needs a contact');
+      // Auto mode = round-robin. A legacy config with no mode and no
+      // agent is the same shape the builder renders as round-robin.
+      const isAuto = cfg.mode === 'round_robin' || (!cfg.mode && !cfg.agent_id);
       let agentId = cfg.agent_id;
-      if (cfg.mode === 'round_robin') {
-        // Pick any member of the account. The existing implementation
-        // only ever returned the automation's author; preserving that
-        // shape until a real round-robin algorithm replaces it.
-        const { data: profiles } = await db
-          .from('profiles')
-          .select('user_id')
-          .eq('account_id', args.automation.account_id)
-          .limit(1);
-        agentId = profiles?.[0]?.user_id;
+      let agentLabel = agentId ?? '';
+      let agentName = '';
+      if (isAuto) {
+        const picked = await pickAutoAssignAgent(args.automation.account_id, {
+          participantIds: cfg.participant_ids,
+        });
+        if (!picked) return 'no agent available to assign';
+        agentId = picked.user_id;
+        agentName = picked.full_name ?? '';
+        agentLabel = picked.full_name
+          ? `${picked.full_name} (${picked.user_id})`
+          : picked.user_id;
       }
       if (!agentId) return 'no agent resolved';
-      await db
+      const query = db
         .from('conversations')
         .update({ assigned_agent_id: agentId })
         .eq('account_id', args.automation.account_id)
         .eq('contact_id', args.contactId);
-      return `assigned to ${agentId}`;
+      if (isAuto) {
+        // Round-robin must not steal a conversation a human already owns —
+        // otherwise a "new message" trigger would yank every thread to a
+        // different agent on each inbound message. The `is null` filter
+        // makes the check atomic: the update only lands on conversations
+        // that are still unassigned.
+        const { data, error } = await query
+          .is('assigned_agent_id', null)
+          .select('id');
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) return 'conversation already assigned';
+        // Remember what this run assigned so a later step in the SAME
+        // automation may still talk to the customer (see isOwnedByHuman).
+        for (const row of data) {
+          const id = (row as { id?: string }).id;
+          if (id) args.assignedInRun?.add(id);
+        }
+        // The assignment landed — introduce the new owner. Only now: the
+        // message would be a lie if nobody actually took the thread.
+        const greeted = await sendAssignIntro(cfg, args, agentId, agentName);
+        // Say in the log whether the greeting went out, otherwise the
+        // step looks identical to a run that never sent anything.
+        return `assigned to ${agentLabel}${greeted ? '; greeting sent' : ''}`;
+      }
+      // Specific-agent mode: "always assign", so the update lands on
+      // every conversation of the contact — including ones this agent
+      // already owned. Snapshot the pre-update state first: only the
+      // conversations this agent just took are exempt from the
+      // owned-by-a-human guard.
+      const { data: before } = await db
+        .from('conversations')
+        .select('id')
+        .eq('account_id', args.automation.account_id)
+        .eq('contact_id', args.contactId)
+        .eq('assigned_agent_id', agentId);
+      const alreadyOwned = new Set((before ?? []).map((r) => r.id));
+      await query;
+      const { data: after } = await db
+        .from('conversations')
+        .select('id')
+        .eq('account_id', args.automation.account_id)
+        .eq('contact_id', args.contactId);
+      for (const row of after ?? []) {
+        const id = (row as { id?: string }).id;
+        if (id && !alreadyOwned.has(id)) args.assignedInRun?.add(id);
+      }
+      return `assigned to ${agentLabel}`;
     }
 
     case 'update_contact_field': {
@@ -651,16 +724,14 @@ async function runStep(
         // Upsert on the table's UNIQUE(contact_id, custom_field_id) so repeated
         // runs overwrite rather than duplicate. Tenancy is enforced above and,
         // for the contact side, by the entry-point ownership guard.
-        await db
-          .from('contact_custom_values')
-          .upsert(
-            {
-              contact_id: args.contactId,
-              custom_field_id: customFieldId,
-              value,
-            },
-            { onConflict: 'contact_id,custom_field_id' }
-          );
+        await db.from('contact_custom_values').upsert(
+          {
+            contact_id: args.contactId,
+            custom_field_id: customFieldId,
+            value,
+          },
+          { onConflict: 'contact_id,custom_field_id' }
+        );
         return `custom field updated`;
       }
 
@@ -820,6 +891,9 @@ async function runStep(
       // same logic send_message uses, so the LLM reply lands in the
       // same thread the user is reading.
       const conversationId = await resolveConversationId(args);
+      if (await isOwnedByHuman(conversationId, args)) {
+        return 'skipped: conversation is owned by an agent';
+      }
       const recentMessages = await buildConversationContext(
         db,
         conversationId,
@@ -993,6 +1067,9 @@ async function runStep(
       }
 
       const conversationId = await resolveConversationId(args);
+      if (await isOwnedByHuman(conversationId, args)) {
+        return 'skipped: conversation is owned by an agent';
+      }
       const captionTemplate = cfg.caption ?? '';
 
       const sent: string[] = [];
@@ -1096,6 +1173,74 @@ function coerceExtractField(
 // ------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------
+
+/**
+ * Does a human own this conversation?
+ *
+ * A conversation with an assignee is the agent's: the AI auto-reply
+ * already stands down for it (lib/ai/auto-reply.ts), so an automation
+ * that keeps texting the customer would talk over the human who just
+ * took the thread. The same goes for the other automations on the
+ * account — two parties answering the same customer is worse than
+ * either one alone.
+ *
+ * Conversations this same run just assigned are exempt: "assign, then
+ * send the greeting" is a legitimate flow.
+ */
+async function isOwnedByHuman(
+  conversationId: string,
+  args: ExecuteArgs
+): Promise<boolean> {
+  if (args.assignedInRun?.has(conversationId)) return false;
+  const { data } = await supabaseAdmin()
+    .from('conversations')
+    .select('assigned_agent_id')
+    .eq('id', conversationId)
+    .maybeSingle();
+  return !!data?.assigned_agent_id;
+}
+
+/**
+ * Send the round-robin "I am your agent now" greeting.
+ *
+ * Runs right after the assignment lands so the customer hears it from
+ * the agent who actually got the thread. The message is attributed to
+ * that agent (sender_type='agent'), not to the bot, so the inbox shows
+ * the introduction coming from them.
+ *
+ * No-op when the step has no greeting configured or when the rendered
+ * text is empty (e.g. a template that is only `{{ agent.name }}` on a
+ * member whose profile has no name).
+ *
+ * Returns true when a message actually went out.
+ */
+async function sendAssignIntro(
+  cfg: AssignConversationStepConfig,
+  args: ExecuteArgs,
+  agentId: string,
+  agentName: string
+): Promise<boolean> {
+  const template = cfg.intro_message?.trim();
+  if (!template) return false;
+  const conversationId = await resolveConversationId(args);
+  const text = interpolate(template, args, undefined, {
+    agent: {
+      name: agentName,
+      first_name: agentName.trim().split(/\s+/)[0] ?? '',
+    },
+  });
+  if (!text.trim()) return false;
+  await engineSendText({
+    accountId: args.automation.account_id,
+    userId: args.automation.user_id,
+    conversationId,
+    contactId: args.contactId!,
+    text,
+    senderId: agentId,
+  });
+  args.messagesSent++;
+  return true;
+}
 
 /**
  * Pick the conversation a send-type step should use. Prefer the id the
@@ -1337,6 +1482,9 @@ function resolvePath(root: unknown, parts: Array<string | number>): unknown {
  *    outside it, resolves to empty)
  *  - `{{ loop.<field> }}` — field on the current array item, e.g.
  *    `{{ loop.title }}` reads `currentItem.title`
+ *  - `{{ agent.name }}` / `{{ agent.first_name }}` — the agent the
+ *    round-robin assignment just picked (only passed by the steps that
+ *    know who it is; empty elsewhere)
  *
  * Unknown / partial paths resolve to empty string so a typo in a
  * template silently produces a blank rather than `{{ undefined }}`.
@@ -1344,7 +1492,8 @@ function resolvePath(root: unknown, parts: Array<string | number>): unknown {
 function interpolate(
   s: string,
   args: ExecuteArgs,
-  loopContext?: LoopContext
+  loopContext?: LoopContext,
+  scope?: Record<string, unknown>
 ): string {
   return s.replace(/\{\{\s*([\w.[\]]+)\s*\}\}/g, (_, key) => {
     const partsRaw = String(key);
@@ -1381,6 +1530,15 @@ function interpolate(
     }
     if (parts[0] === 'vars') {
       const value = resolvePath(args.context.vars, parts.slice(1));
+      if (value == null) return '';
+      if (typeof value === 'string') return value;
+      if (typeof value === 'number' || typeof value === 'boolean')
+        return String(value);
+      return JSON.stringify(value);
+    }
+    // Step-supplied scope (e.g. `agent` for the round-robin greeting).
+    if (scope && parts[0] in scope) {
+      const value = resolvePath(scope[parts[0]], parts.slice(1));
       if (value == null) return '';
       if (typeof value === 'string') return value;
       if (typeof value === 'number' || typeof value === 'boolean')

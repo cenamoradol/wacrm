@@ -4,6 +4,7 @@ import {
   type AccountRole,
   canDeleteAccount,
   canEditSettings,
+  canManageConversations,
   canManageMembers,
   canSendMessages,
   canTransferOwnership,
@@ -105,6 +106,13 @@ describe('capability predicates', () => {
     expect(canSendMessages('admin')).toBe(true);
     expect(canSendMessages('agent')).toBe(true);
     expect(canSendMessages('viewer')).toBe(false);
+  });
+
+  it('canManageConversations: agent+ only', () => {
+    expect(canManageConversations('owner')).toBe(true);
+    expect(canManageConversations('admin')).toBe(true);
+    expect(canManageConversations('agent')).toBe(true);
+    expect(canManageConversations('viewer')).toBe(false);
   });
 
   it('canViewOnly: viewer only', () => {

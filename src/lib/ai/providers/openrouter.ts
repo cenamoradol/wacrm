@@ -17,5 +17,9 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
 export async function generateOpenRouter(
   args: Omit<OpenAiCompatibleArgs, 'baseUrl'>
 ): Promise<ProviderResult> {
-  return openAiCompatibleChat({ ...args, baseUrl: OPENROUTER_URL });
+  return openAiCompatibleChat({
+    ...args,
+    baseUrl: OPENROUTER_URL,
+    providerName: 'OpenRouter',
+  });
 }

@@ -14,5 +14,9 @@ const OPENAI_URL = 'https://api.openai.com/v1';
 export async function generateOpenAi(
   args: Omit<OpenAiCompatibleArgs, 'baseUrl'>
 ): Promise<ProviderResult> {
-  return openAiCompatibleChat({ ...args, baseUrl: OPENAI_URL });
+  return openAiCompatibleChat({
+    ...args,
+    baseUrl: OPENAI_URL,
+    providerName: 'OpenAI',
+  });
 }

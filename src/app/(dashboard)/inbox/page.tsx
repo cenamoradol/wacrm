@@ -554,6 +554,39 @@ function InboxPageInner() {
     [activeConversation]
   );
 
+  // The thread archived / unarchived a conversation. Patch the list copy
+  // so the row moves in or out of the working inbox immediately; when it
+  // leaves, close the thread — an archived conversation isn't part of the
+  // inbox anymore.
+  const handleArchivedChange = useCallback(
+    (conversationId: string, archived: boolean) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === conversationId ? { ...c, archived } : c))
+      );
+      if (activeConversation?.id === conversationId) {
+        // Keep the open thread's own copy in sync — the header menu
+        // switches between "Archive" and "Unarchive" based on it.
+        setActiveConversation((prev) => (prev ? { ...prev, archived } : prev));
+        if (archived) {
+          // Archived threads leave the working inbox — close the thread.
+          handleCloseConversation();
+        }
+      }
+    },
+    [activeConversation?.id, handleCloseConversation]
+  );
+
+  // The thread deleted a conversation (chat + history gone for good).
+  const handleConversationDeleted = useCallback(
+    (conversationId: string) => {
+      setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      if (activeConversation?.id === conversationId) {
+        handleCloseConversation();
+      }
+    },
+    [activeConversation?.id, handleCloseConversation]
+  );
+
   // On mobile (<lg) we show a SINGLE pane — either the list or the
   // thread — rather than cramming both side-by-side. Selecting a
   // conversation slides the thread in; the thread's back button pops
@@ -575,10 +608,18 @@ function InboxPageInner() {
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
-            thread can occupy the full width. Always visible on lg+. */}
+            thread can occupy the full width. Always visible on lg+.
+
+            `min-w-0` is load-bearing on mobile: as a flex item the
+            default `min-width: auto` resolves to the pane's
+            min-content width, and the conversation rows use
+            `truncate` (white-space: nowrap) for the message preview —
+            so one long preview blew the pane out to ~1650px and the
+            `overflow-hidden` on the row clipped the right edge,
+            taking the unread badge and the timestamp with it. */}
         <div
           className={cn(
-            'flex h-full flex-1 lg:flex-none',
+            'flex h-full min-w-0 flex-1 lg:flex-none',
             hasActiveConv ? 'hidden lg:flex' : 'flex'
           )}
         >
@@ -621,6 +662,8 @@ function InboxPageInner() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            onArchivedChange={handleArchivedChange}
+            onDeleted={handleConversationDeleted}
           />
         </div>
 

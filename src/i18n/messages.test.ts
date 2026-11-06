@@ -63,46 +63,71 @@ describe('message catalogue parity', () => {
     'Automations.builder.config.messageItemTemplateHint',
   ];
 
+  // Same ICU rules for the round-robin introduction message: it shows
+  // literal `{{ agent.name }}` placeholders. A quote only opens a
+  // quoted literal when it sits right before the `{`, so the strings
+  // must quote each placeholder individually.
+  const ASSIGN_INTRO_KEYS = [
+    'Automations.builder.config.introMessageLabel',
+    'Automations.builder.config.introMessagePlaceholder',
+    'Automations.builder.config.introMessageHint',
+  ];
+
+  function unparseable(locale: string, keys: string[]): string[] {
+    const raw = readFileSync(join(MESSAGES_DIR, `${locale}.json`), 'utf8');
+    const tree: unknown = JSON.parse(raw);
+    const get = (key: string): unknown => {
+      let cur: unknown = tree;
+      for (const seg of key.split('.')) {
+        if (cur && typeof cur === 'object') {
+          cur = (cur as Record<string, unknown>)[seg];
+        } else {
+          return undefined;
+        }
+      }
+      return cur;
+    };
+    const bad: string[] = [];
+    for (const key of keys) {
+      const value = get(key);
+      if (typeof value !== 'string') {
+        bad.push(`  ${key}: missing or not a string`);
+        continue;
+      }
+      try {
+        parseIcu(value);
+      } catch (err) {
+        const code = (err as { code?: string }).code ?? 'UNKNOWN';
+        bad.push(
+          `  ${key}: [${code}] ${(err as Error).message}\n    value: ${JSON.stringify(value).slice(0, 200)}`
+        );
+      }
+    }
+    return bad;
+  }
+
   it.each([SOURCE_LOCALE, ...TRANSLATED_LOCALES])(
     '%s.json: send_message list-mode strings parse as ICU MessageFormat',
     (locale) => {
-      const raw = readFileSync(
-        join(MESSAGES_DIR, `${locale}.json`),
-        'utf8'
-      );
-      const tree: unknown = JSON.parse(raw);
-      const get = (key: string): unknown => {
-        let cur: unknown = tree;
-        for (const seg of key.split('.')) {
-          if (cur && typeof cur === 'object') {
-            cur = (cur as Record<string, unknown>)[seg];
-          } else {
-            return undefined;
-          }
-        }
-        return cur;
-      };
-      const bad: string[] = [];
-      for (const key of LIST_MODE_KEYS) {
-        const value = get(key);
-        if (typeof value !== 'string') {
-          bad.push(`  ${key}: missing or not a string`);
-          continue;
-        }
-        try {
-          parseIcu(value);
-        } catch (err) {
-          const code = (err as { code?: string }).code ?? 'UNKNOWN';
-          bad.push(
-            `  ${key}: [${code}] ${(err as Error).message}\n    value: ${JSON.stringify(value).slice(0, 200)}`
-          );
-        }
-      }
+      const bad = unparseable(locale, LIST_MODE_KEYS);
       expect(
         bad,
         bad.length === 0
           ? 'all list-mode strings parse OK'
           : `${locale}.json has ${bad.length} unparseable list-mode strings:\n${bad.join('\n')}`
+      ).toEqual([]);
+    }
+  );
+
+  it.each([SOURCE_LOCALE, ...TRANSLATED_LOCALES])(
+    '%s.json: assign_conversation intro-message strings parse as ICU MessageFormat',
+    (locale) => {
+      const bad = unparseable(locale, ASSIGN_INTRO_KEYS);
+      expect(
+        bad,
+        bad.length === 0
+          ? 'all intro-message strings parse OK'
+          : `${locale}.json has ${bad.length} unparseable intro-message strings:\n${bad.join('\n')}`
       ).toEqual([]);
     }
   );

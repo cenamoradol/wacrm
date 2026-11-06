@@ -13,10 +13,11 @@ import type { AiProvider } from './types';
 export const AI_PROVIDER_DEFAULT_MODEL: Record<AiProvider, string> = {
   openai: 'gpt-5.4-mini',
   anthropic: 'claude-haiku-4-5-20251001',
-  // MiniMax-M2: open-source MoE, fast + cheap, solid multilingual.
-  // Text-01 is overkill for short WhatsApp replies; switch via the model
-  // input if you need deeper reasoning.
-  minimax: 'MiniMax-M2',
+  // MiniMax-M3.1-Flash: the current M Plan / Token Plan model. M2 was
+  // retired by MiniMax (HTTP 404 "no longer available"), so the old
+  // default now fails on every call. Text-01 is overkill for short
+  // WhatsApp replies; switch via the model input if you need more.
+  minimax: 'MiniMax-M3.1-Flash',
   // OpenRouter addresses models as `provider/model`; gpt-5.4-mini is
   // the same cheap/fast default the OpenAI provider uses.
   openrouter: 'openai/gpt-5.4-mini',

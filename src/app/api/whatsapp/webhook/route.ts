@@ -752,6 +752,10 @@ async function processMessage(
       last_message_at: new Date().toISOString(),
       unread_count: (conversation.unread_count || 0) + 1,
       updated_at: new Date().toISOString(),
+      // A new inbound message pulls the thread back into the working
+      // inbox — otherwise a customer writing to an archived chat would
+      // go unnoticed.
+      archived: false,
     })
     .eq('id', conversation.id);
 

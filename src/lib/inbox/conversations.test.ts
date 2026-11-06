@@ -1,9 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { matchesContactFilters, normalizeConversation } from './conversations';
+import {
+  matchesContactFilters,
+  matchesInboxFilter,
+  normalizeConversation,
+} from './conversations';
 import type { Conversation } from '@/types';
 
 function makeConversation(
-  contact: Partial<Conversation['contact']> | null
+  contact: Partial<Conversation['contact']> | null,
+  overrides: Partial<Conversation> = {}
 ): Conversation {
   return {
     id: 'c1',
@@ -24,6 +29,7 @@ function makeConversation(
           ...contact,
         }
       : undefined,
+    ...overrides,
   };
 }
 
@@ -94,6 +100,43 @@ describe('matchesContactFilters', () => {
     expect(
       matchesContactFilters(conv, { tagIds: ['tX'], company: 'Acme' })
     ).toBe(false);
+  });
+});
+
+describe('matchesInboxFilter', () => {
+  it('matches live conversations by status', () => {
+    const conv = makeConversation(null, { status: 'pending' });
+    expect(matchesInboxFilter(conv, 'all')).toBe(true);
+    expect(matchesInboxFilter(conv, 'pending')).toBe(true);
+    expect(matchesInboxFilter(conv, 'open')).toBe(false);
+  });
+
+  it('matches unread conversations', () => {
+    expect(matchesInboxFilter(makeConversation(null), 'unread')).toBe(false);
+    expect(
+      matchesInboxFilter(makeConversation(null, { unread_count: 2 }), 'unread')
+    ).toBe(true);
+  });
+
+  it('hides archived conversations from every live filter', () => {
+    const archived = makeConversation(null, {
+      archived: true,
+      unread_count: 3,
+    });
+    expect(matchesInboxFilter(archived, 'all')).toBe(false);
+    expect(matchesInboxFilter(archived, 'unread')).toBe(false);
+    expect(matchesInboxFilter(archived, 'open')).toBe(false);
+  });
+
+  it('surfaces archived conversations only in the archived view', () => {
+    const archived = makeConversation(null, { archived: true });
+    expect(matchesInboxFilter(archived, 'archived')).toBe(true);
+    expect(matchesInboxFilter(makeConversation(null), 'archived')).toBe(false);
+  });
+
+  it('treats a missing archived flag as not archived', () => {
+    expect(matchesInboxFilter(makeConversation(null), 'all')).toBe(true);
+    expect(matchesInboxFilter(makeConversation(null), 'archived')).toBe(false);
   });
 });
 

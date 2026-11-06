@@ -26,8 +26,19 @@ exactly as before — push is opt-in per device, opt-out is one click in
 > `'openrouter'` to the AI provider allow-list) and
 > `supabase/migrations/064_direct_member_creation.sql` (adds the
 > `add_account_member` RPC used by the new member-management flow).
+> Also apply `supabase/migrations/065_conversation_archive.sql` (adds the
+> `conversations.archived` flag behind the new archive / delete actions).
 
 ### Added
+
+- **Archive and delete conversations.** The thread header's **⋯** menu
+  offers **Archive conversation** — the chat and its history stay put, but
+  the thread leaves the working inbox so months of old chats don't bury
+  it (**Archived** in the inbox filter brings them back) — and **Delete
+  conversation**, which removes the chat, its messages and its history for
+  good behind a confirmation dialog. A new inbound message pulls an
+  archived thread back into the inbox by itself, and archived threads no
+  longer feed the unread badge.
 
 - **Admin-managed member logins.** An owner/admin can now create a
   teammate's account directly from **Settings → Members → Add member**

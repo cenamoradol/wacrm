@@ -64,6 +64,7 @@ import {
   blankListPayload,
 } from '@/components/interactive/interactive-builder';
 import { interactivePayloadPreviewText } from '@/lib/whatsapp/interactive';
+import { canSendMessages } from '@/lib/auth/roles';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 import {
@@ -524,6 +525,62 @@ function AgentSelect({
         <option value={value}>{t('agents.unknown', { id: value })}</option>
       )}
     </select>
+  );
+}
+
+/**
+ * Multi-select of the team members that participate in auto-assignment.
+ *
+ * `value === undefined` means "no explicit list" — every member who can
+ * reply participates (the original behaviour), so the box shows every
+ * eligible member checked. The first edit writes the list explicitly,
+ * after which unchecked members are skipped by the rotation.
+ *
+ * Viewers are not offered: they are read-only and can't reply, so they
+ * must never receive a conversation.
+ */
+function ParticipantMultiSelect({
+  value,
+  onChange,
+  t,
+}: {
+  value: string[] | undefined;
+  onChange: (ids: string[]) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const { members } = useResources();
+  const eligible = members.filter((m) => canSendMessages(m.role));
+  if (eligible.length === 0) {
+    return (
+      <p className="text-muted-foreground text-xs">
+        {t('agents.placeholder', { defaultValue: 'No team members yet' })}
+      </p>
+    );
+  }
+  const selected = value ?? eligible.map((m) => m.user_id);
+  const toggle = (id: string) =>
+    onChange(
+      selected.includes(id)
+        ? selected.filter((x) => x !== id)
+        : [...selected, id]
+    );
+  return (
+    <div className="border-border bg-muted max-h-40 space-y-1 overflow-y-auto rounded-md border p-2">
+      {eligible.map((m) => (
+        <label
+          key={m.user_id}
+          className="text-foreground flex cursor-pointer items-center gap-2 text-xs"
+        >
+          <input
+            type="checkbox"
+            checked={selected.includes(m.user_id)}
+            onChange={() => toggle(m.user_id)}
+            className="accent-primary h-3.5 w-3.5"
+          />
+          <span>{m.full_name || m.email || m.user_id}</span>
+        </label>
+      ))}
+    </div>
   );
 }
 
@@ -1623,7 +1680,49 @@ function StepEditor({
               </option>
               <option value="specific">{t('config.modes.specific')}</option>
             </select>
+            <p className="text-muted-foreground mt-1 text-[11px]">
+              {((cfg.mode as string) ?? 'round_robin') === 'specific'
+                ? t('config.modes.specificHint', {
+                    defaultValue:
+                      'Always assigns to the agent you pick, even when the conversation already has an owner.',
+                  })
+                : t('config.modes.round_robinHint', {
+                    defaultValue:
+                      'Picks the next team member automatically: prefers whoever is online, then the one with the fewest open conversations, then whoever has been idle the longest. A conversation that already has an owner is left alone.',
+                  })}
+            </p>
           </FieldBlock>
+          {((cfg.mode as string) ?? 'round_robin') !== 'specific' && (
+            <>
+              <FieldBlock label={t('config.participantsLabel')}>
+                <ParticipantMultiSelect
+                  value={cfg.participant_ids as string[] | undefined}
+                  onChange={(ids) => set({ participant_ids: ids })}
+                  t={t}
+                />
+                <p className="text-muted-foreground mt-1 text-[11px]">
+                  {t('config.participantsHint', {
+                    defaultValue:
+                      'Only the checked members receive conversations. Unchecked members are skipped by the rotation.',
+                  })}
+                </p>
+              </FieldBlock>
+              {/* Introduction message — sent to the customer as soon as
+                  the rotation hands the conversation to someone, so the
+                  new agent can greet them without typing. */}
+              <FieldBlock label={t('config.introMessageLabel')}>
+                <Textarea
+                  value={(cfg.intro_message as string) ?? ''}
+                  onChange={(e) => set({ intro_message: e.target.value })}
+                  placeholder={t('config.introMessagePlaceholder')}
+                  className="bg-muted text-foreground min-h-20"
+                />
+                <p className="text-muted-foreground mt-1 text-[11px]">
+                  {t('config.introMessageHint')}
+                </p>
+              </FieldBlock>
+            </>
+          )}
           {cfg.mode === 'specific' && (
             <FieldBlock label={t('config.agentLabel')}>
               <AgentSelect
@@ -2181,7 +2280,10 @@ function FieldBlock({
 function previewFor(step: BuilderStep): string {
   switch (step.step_type) {
     case 'send_message':
-      if ((step.step_config.list_path as string) && (step.step_config.item_template as string)) {
+      if (
+        (step.step_config.list_path as string) &&
+        (step.step_config.item_template as string)
+      ) {
         return `list: ${step.step_config.list_path}`;
       }
       return (step.step_config.text as string) || 'no text yet';

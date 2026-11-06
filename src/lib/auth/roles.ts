@@ -90,6 +90,16 @@ export function canSendMessages(role: AccountRole): boolean {
 }
 
 /**
+ * Owner / admin / agent: triage conversations — archive a thread out of
+ * the working inbox, or delete it (chat + history) outright. Viewers are
+ * read-only. Mirrors the `is_account_member(account_id, 'agent')` RLS
+ * check behind the `conversations` UPDATE / DELETE policies.
+ */
+export function canManageConversations(role: AccountRole): boolean {
+  return hasMinRole(role, 'agent');
+}
+
+/**
  * Viewer: read-only across everything. Provided as a positive
  * predicate so UI gates read naturally (`if (canViewOnly(role))`
  * shows the "Read-only" tooltip without inverting `canSendMessages`).

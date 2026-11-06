@@ -328,7 +328,14 @@ export function MessageBubble({
       )}
       <div
         className={cn(
-          'relative rounded-2xl px-3 py-2',
+          // `max-w-full` is load-bearing: the bubble is a flex item (column
+          // container, `items-end`), so its width resolves to fit-content —
+          // and fit-content's floor is the content's min-content width, so
+          // a message carrying a long URL blew the bubble past the 75% cap
+          // of the row wrapper and the left edge was clipped off-screen on
+          // mobile. Capping at the wrapper's width makes the bubble honour
+          // the cap and `break-words` break the URL instead.
+          'relative max-w-full rounded-2xl px-3 py-2',
           isAgent
             ? 'bg-primary text-primary-foreground rounded-br-md'
             : 'bg-muted text-foreground rounded-bl-md'
