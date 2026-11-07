@@ -13,6 +13,9 @@
 // API route guards and UI gates should call them rather than
 // open-coding their own role checks. That keeps role-policy
 // changes a one-file diff.
+//
+// "Where may this role go?" (which pages it can open) lives in
+// `@/lib/auth/sections` — same rule, one map per concern.
 // ============================================================
 
 export type AccountRole = 'owner' | 'admin' | 'agent' | 'viewer';

@@ -1,6 +1,29 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { isAccountRole } from '@/lib/auth/roles';
+import {
+  canAccessRoute,
+  canAccessSettingsTab,
+  defaultLanding,
+  defaultSettingsTab,
+  matchRoute,
+} from '@/lib/auth/sections';
+
+/**
+ * True for speculative requests (link prefetch, hover prefetch). The
+ * role lookup below costs a database round trip, and the sidebar
+ * prefetches every visible link — so prefetches skip the check. The
+ * real navigation request still runs it.
+ */
+function isPrefetch(request: NextRequest): boolean {
+  return (
+    request.headers.get('next-router-prefetch') === '1' ||
+    request.headers.get('purpose') === 'prefetch' ||
+    request.headers.get('sec-purpose') === 'prefetch'
+  );
+}
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -102,6 +125,53 @@ export async function middleware(request: NextRequest) {
     return withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     );
+  }
+
+  // Role gate — the Inbox is the shared workspace; every other
+  // section is admin+. The caller's own profile row carries the
+  // role and is readable by its owner, so one indexed lookup tells
+  // us which section this request may open. A failed lookup leaves
+  // access unchanged — a broken read must not lock anyone out.
+  if (user && !isPrefetch(request)) {
+    const route = matchRoute(request.nextUrl.pathname);
+    // `/inbox` is open to every member — skip the profile lookup on
+    // the app's hottest page.
+    if (route && route !== '/inbox') {
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('account_role')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (!profileError && profile) {
+        // A profile row with a role this build doesn't know falls
+        // back to the least-privileged role rather than unlocking
+        // every section.
+        const role = isAccountRole(profile.account_role)
+          ? profile.account_role
+          : 'viewer';
+
+        const allowed =
+          route === '/settings'
+            ? canAccessSettingsTab(
+                role,
+                request.nextUrl.searchParams.get('tab')
+              )
+            : canAccessRoute(role, request.nextUrl.pathname);
+
+        if (!allowed) {
+          const url = request.nextUrl.clone();
+          if (route === '/settings') {
+            url.pathname = '/settings';
+            url.search = `?tab=${defaultSettingsTab(role)}`;
+          } else {
+            url.pathname = defaultLanding(role);
+            url.search = '';
+          }
+          return withRefreshedCookies(NextResponse.redirect(url));
+        }
+      }
+    }
   }
 
   return supabaseResponse;

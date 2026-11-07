@@ -9,11 +9,12 @@ import type { AutomationTriggerType } from '@/types';
  * account_id and dispatch over the account's automations.
  */
 export async function POST(request: Request) {
-  // Firing automations sends outbound WhatsApp — a write action. Require
-  // at least `agent`; a viewer must not be able to trigger sends.
+  // Firing automations sends outbound WhatsApp — a write action. The
+  // Automations section is admin-only, so require `admin`; a viewer
+  // must not be able to trigger sends.
   let accountId: string;
   try {
-    const ctx = await requireRole('agent');
+    const ctx = await requireRole('admin');
     accountId = ctx.accountId;
   } catch (err) {
     return toErrorResponse(err);

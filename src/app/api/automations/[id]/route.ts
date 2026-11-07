@@ -25,6 +25,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+
+  // Admin-only section — see `@/lib/auth/sections`.
+  try {
+    await requireRole('admin');
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+
   const user = await requireUser();
   if (!user)
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -54,9 +62,10 @@ export async function PATCH(
 
   // Editing an automation is a write — the RLS automations_update policy
   // requires `agent`, but this route mutates via the service-role client
-  // which bypasses RLS, so enforce the role here.
+  // which bypasses RLS, so enforce the role here. The section is
+  // admin-only.
   try {
-    await requireRole('agent');
+    await requireRole('admin');
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -150,10 +159,10 @@ export async function DELETE(
 ) {
   const { id } = await params;
 
-  // Deleting an automation is a write — enforce `agent` (the service-role
+  // Deleting an automation is a write — enforce `admin` (the service-role
   // client below bypasses the agent-gated automations_delete RLS).
   try {
-    await requireRole('agent');
+    await requireRole('admin');
   } catch (err) {
     return toErrorResponse(err);
   }

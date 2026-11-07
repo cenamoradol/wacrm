@@ -14,6 +14,8 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { SETTINGS_TABS, type SettingsTab } from '@/lib/auth/sections';
+
 /**
  * Settings information architecture for the redesigned page.
  *
@@ -21,23 +23,13 @@ import {
  * landing. The URL query param stays `?tab=` (deep-linkable, and it
  * keeps the existing links in sidebar.tsx / header.tsx working) — we
  * just map the old values onto the new sections.
+ *
+ * The tab ids live in `@/lib/auth/sections` because the middleware
+ * gates them by role too; labels, icons and grouping stay here.
  */
-export const SETTINGS_SECTIONS = [
-  'overview',
-  'profile',
-  'security',
-  'appearance',
-  'whatsapp',
-  'templates',
-  'quick-replies',
-  'fields',
-  'deals',
-  'notifications',
-  'members',
-  'api',
-] as const;
+export const SETTINGS_SECTIONS = SETTINGS_TABS;
 
-export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+export type SettingsSection = SettingsTab;
 
 export const DEFAULT_SECTION: SettingsSection = 'overview';
 

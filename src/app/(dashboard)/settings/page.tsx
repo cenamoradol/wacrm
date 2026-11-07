@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 
 import { useAuth } from '@/hooks/use-auth';
 import { useTheme } from '@/hooks/use-theme';
+import { canAccessSettingsTab, defaultSettingsTab } from '@/lib/auth/sections';
 import { SettingsRail } from '@/components/settings/settings-rail';
 import { SettingsOverview } from '@/components/settings/settings-overview';
 import { ProfileForm } from '@/components/settings/profile-form';
@@ -43,7 +44,7 @@ export default function SettingsPage() {
 function SettingsPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { defaultCurrency } = useAuth();
+  const { defaultCurrency, accountRole, profileLoading } = useAuth();
   const { mode } = useTheme();
   const t = useTranslations('Settings');
 
@@ -51,7 +52,15 @@ function SettingsPageInner() {
   // section — deep-linkable, and it keeps the existing links in the
   // app sidebar/header working. Legacy tab values (tags, custom-fields)
   // resolve onto their new home; unknown/empty → the Overview landing.
-  const section = resolveSection(searchParams.get('tab'));
+  // Tabs the caller's role may not open fall back to the first one it
+  // can (the Overview landing is admin-only). Until the role lands we
+  // render the requested tab — the server already blocked the tabs the
+  // caller may not open — so admins never see the panel swap.
+  const requested = resolveSection(searchParams.get('tab'));
+  const section =
+    profileLoading || canAccessSettingsTab(accountRole, requested)
+      ? requested
+      : defaultSettingsTab(accountRole);
 
   const go = (next: SettingsSection) => {
     const params = new URLSearchParams(searchParams.toString());

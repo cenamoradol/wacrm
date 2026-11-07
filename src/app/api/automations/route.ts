@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { supabaseAdmin } from '@/lib/automations/admin-client';
@@ -13,12 +14,15 @@ import {
 } from '@/lib/automations/validate';
 
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // The Automations section is admin-only (see `@/lib/auth/sections`).
+  // The middleware gates the page; this keeps the API honest for
+  // direct callers.
+  let supabase: SupabaseClient;
+  try {
+    ({ supabase } = await requireRole('admin'));
+  } catch (err) {
+    return toErrorResponse(err);
+  }
 
   const { data, error } = await supabase
     .from('automations')
@@ -32,9 +36,10 @@ export async function GET() {
 export async function POST(request: Request) {
   // Creating an automation is a write — the RLS automations_insert policy
   // requires `agent`, but this route inserts via the service-role client
-  // which bypasses RLS, so the role must be enforced here.
+  // which bypasses RLS, so the role must be enforced here. The section
+  // is admin-only, so `admin` it is.
   try {
-    await requireRole('agent');
+    await requireRole('admin');
   } catch (err) {
     return toErrorResponse(err);
   }

@@ -8,10 +8,10 @@ import { getFlowTemplate } from '@/lib/flows/templates';
  * GET /api/flows — list the caller's flows.
  * POST /api/flows — create a new (draft) flow.
  *
- * Available to every authenticated user. The previous per-account
- * beta gate was removed when Flows went to soft-GA; the UI still
- * shows a "Beta" label so users know the surface is young, but the
- * routes themselves are open.
+ * Admin-only: the Flows section is account administration (see
+ * `@/lib/auth/sections`). The previous per-account beta gate was
+ * removed when Flows went to soft-GA; the UI still shows a "Beta"
+ * label so users know the surface is young.
  */
 
 async function requireUser(): Promise<
@@ -33,6 +33,13 @@ async function requireUser(): Promise<
 }
 
 export async function GET() {
+  // The Flows section is admin-only (see `@/lib/auth/sections`).
+  try {
+    await requireRole('admin');
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+
   const guard = await requireUser();
   if (!guard.ok) {
     return NextResponse.json(guard.body, { status: guard.status });
@@ -52,9 +59,10 @@ export async function GET() {
 export async function POST(request: Request) {
   // Creating a flow is a write — the RLS flows_insert policy requires
   // `agent`, but this route inserts via the service-role client which
-  // bypasses RLS, so the role must be enforced here.
+  // bypasses RLS, so the role must be enforced here. The section is
+  // admin-only.
   try {
-    await requireRole('agent');
+    await requireRole('admin');
   } catch (err) {
     return toErrorResponse(err);
   }

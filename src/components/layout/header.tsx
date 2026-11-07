@@ -40,11 +40,12 @@ interface HeaderProps {
 }
 
 import { useTranslations } from 'next-intl';
+import { canAccessSettingsTab } from '@/lib/auth/sections';
 
 export function Header({ onOpenSidebar }: HeaderProps) {
   const t = useTranslations('Header');
   const pathname = usePathname();
-  const { profile, signOut } = useAuth();
+  const { profile, signOut, accountRole } = useAuth();
   const titleKey = getPageTitleKey(pathname);
 
   const initial =
@@ -120,7 +121,11 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             <DropdownMenuItem
               render={
                 <Link
-                  href="/settings?tab=whatsapp"
+                  href={
+                    canAccessSettingsTab(accountRole, 'whatsapp')
+                      ? '/settings?tab=whatsapp'
+                      : '/settings?tab=profile'
+                  }
                   className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
                 />
               }

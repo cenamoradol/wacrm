@@ -11,11 +11,16 @@ import type { Notification } from '@/types';
  * RLS on `notifications` already scopes every read to `auth.uid() =
  * user_id`, so no explicit filter is needed here — same pattern as
  * `useTotalUnread` for conversations.
+ *
+ * `enabled` lets a caller that can't see the Notifications section
+ * skip the query and the realtime channel entirely.
  */
-export function useUnreadNotifications(): number {
+export function useUnreadNotifications(enabled = true): number {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
+    if (!enabled) return;
+
     const supabase = createClient();
     let cancelled = false;
 
@@ -57,7 +62,7 @@ export function useUnreadNotifications(): number {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [enabled]);
 
   return count;
 }

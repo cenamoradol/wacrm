@@ -8,12 +8,14 @@ import { NextRequest } from 'next/server';
 //                      i.e. the freshly *rotated* auth token. The whole point
 //                      of the test is that these must survive onto whatever
 //                      response the middleware returns — including redirects.
+// `mockRole`         — the `account_role` on the caller's profile row.
 let mockUser: { id: string } | null = null;
 let refreshedCookies: Array<{
   name: string;
   value: string;
   options: Record<string, unknown>;
 }> = [];
+let mockRole: string | null = 'admin';
 
 vi.mock('@supabase/ssr', () => ({
   createServerClient: (
@@ -32,6 +34,17 @@ vi.mock('@supabase/ssr', () => ({
         return { data: { user: mockUser } };
       },
     },
+    // The role gate reads the caller's own profile row.
+    from: (table: string) => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({
+            data: table === 'profiles' ? { account_role: mockRole } : null,
+            error: null,
+          }),
+        }),
+      }),
+    }),
   }),
 }));
 
@@ -43,6 +56,7 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-key';
   mockUser = null;
   refreshedCookies = [];
+  mockRole = 'admin';
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -103,5 +117,58 @@ describe('middleware — refreshed auth cookies survive redirects', () => {
     // No redirect — the normal NextResponse.next() already carries cookies.
     expect(res.headers.get('location')).toBeNull();
     expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
+  });
+});
+
+describe('middleware — role gate', () => {
+  it('lets an admin into every section', async () => {
+    mockUser = { id: 'user-1' };
+    mockRole = 'admin';
+
+    const res = await middleware(new NextRequest('https://app.test/contacts'));
+
+    expect(res.headers.get('location')).toBeNull();
+  });
+
+  it('bounces an agent off an admin-only section to the inbox', async () => {
+    mockUser = { id: 'user-1' };
+    mockRole = 'agent';
+
+    const res = await middleware(new NextRequest('https://app.test/contacts'));
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/inbox');
+  });
+
+  it('lets an agent into the inbox', async () => {
+    mockUser = { id: 'user-1' };
+    mockRole = 'agent';
+
+    const res = await middleware(new NextRequest('https://app.test/inbox'));
+
+    expect(res.headers.get('location')).toBeNull();
+  });
+
+  it('bounces an agent off a workspace settings tab to their profile', async () => {
+    mockUser = { id: 'user-1' };
+    mockRole = 'agent';
+
+    const res = await middleware(
+      new NextRequest('https://app.test/settings?tab=whatsapp')
+    );
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toContain('/settings?tab=profile');
+  });
+
+  it('lets an agent into their personal settings tab', async () => {
+    mockUser = { id: 'user-1' };
+    mockRole = 'agent';
+
+    const res = await middleware(
+      new NextRequest('https://app.test/settings?tab=profile')
+    );
+
+    expect(res.headers.get('location')).toBeNull();
   });
 });

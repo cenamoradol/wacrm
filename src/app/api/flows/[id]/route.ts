@@ -51,6 +51,14 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
+
+  // Admin-only section — see `@/lib/auth/sections`.
+  try {
+    await requireRole('admin');
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+
   const guard = await requireOwnership(id);
   if (!guard.ok) return NextResponse.json(guard.body, { status: guard.status });
   const { supabase } = guard;
@@ -91,11 +99,12 @@ export async function PUT(
 ) {
   const { id } = await context.params;
 
-  // Writes require at least `agent` — the RLS flows_update policy demands
-  // it, but this route mutates via the service-role client which bypasses
+  // Writes require `admin` — the RLS flows_update policy demands
+  // `agent`, but this route mutates via the service-role client which bypasses
   // RLS, so the role must be enforced here (a viewer passes ownership).
+  // The Flows section is admin-only.
   try {
-    await requireRole('agent');
+    await requireRole('admin');
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -187,10 +196,10 @@ export async function DELETE(
 ) {
   const { id } = await context.params;
 
-  // Writes require at least `agent` — see the PUT handler note. The
+  // Writes require `admin` — see the PUT handler note. The
   // service-role client below bypasses the agent-gated flows_delete RLS.
   try {
-    await requireRole('agent');
+    await requireRole('admin');
   } catch (err) {
     return toErrorResponse(err);
   }

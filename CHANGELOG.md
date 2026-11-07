@@ -75,6 +75,17 @@ exactly as before — push is opt-in per device, opt-out is one click in
   `api.onesignal.com` / `*.onesignal.com` are added to `script-src` /
   `connect-src` so the SDK and its telemetry endpoints can load.
 
+### Changed
+
+- **Agents and viewers are inbox-only.** The shared inbox stays open to
+  every member, but the other sections (dashboard, contacts, pipelines,
+  broadcasts, automations, flows, AI agents, team, notifications) are now
+  admin/owner territory: the sidebar hides them, a direct URL is bounced
+  back to the inbox, and the APIs behind them require the `admin` role.
+  Members keep their own personal settings (profile, password, appearance).
+  The section policy lives in one file (`src/lib/auth/sections.ts`) — add
+  a new section there to gate it.
+
 ### Notes for operators
 
 - The trigger reads credentials from Postgres GUC settings

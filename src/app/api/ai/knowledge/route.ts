@@ -1,9 +1,5 @@
 import { NextResponse } from 'next/server';
-import {
-  getCurrentAccount,
-  requireRole,
-  toErrorResponse,
-} from '@/lib/auth/account';
+import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -16,11 +12,13 @@ import { AiError } from '@/lib/ai/types';
 /**
  * GET /api/ai/knowledge
  *
- * List the account's knowledge-base documents (any member).
+ * List the account's knowledge-base documents. Admin-only: the panel
+ * that reads it lives in the AI Agents section (see
+ * `@/lib/auth/sections`).
  */
 export async function GET() {
   try {
-    const { supabase, accountId } = await getCurrentAccount();
+    const { supabase, accountId } = await requireRole('admin');
     const { data, error } = await supabase
       .from('ai_knowledge_documents')
       .select('id, title, updated_at')

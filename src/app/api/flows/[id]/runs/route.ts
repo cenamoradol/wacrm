@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireRole, toErrorResponse } from '@/lib/auth/account';
 
 /**
  * GET /api/flows/[id]/runs
@@ -10,8 +11,8 @@ import { createClient } from '@/lib/supabase/server';
  * into what the bot did with each customer.
  *
  * RLS does the ownership check (flow_runs has a `user_id` policy);
- * we also gate on the per-account beta flag so the route 404s for
- * non-beta accounts matching the rest of /api/flows.
+ * the Flows section is admin-only (see `@/lib/auth/sections`), so the
+ * role is enforced here too.
  *
  * Limited to the 50 most recent runs. Pagination can come later;
  * the dashboard surface here is for debugging, not heavy querying.
@@ -21,6 +22,12 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
+
+  try {
+    await requireRole('admin');
+  } catch (err) {
+    return toErrorResponse(err);
+  }
 
   const supabase = await createClient();
   const {
