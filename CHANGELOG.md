@@ -31,8 +31,22 @@ exactly as before — push is opt-in per device, opt-out is one click in
 > Also apply `supabase/migrations/066_agent_conversation_scope.sql` (scopes
 > the conversation/message read policies so an agent only sees their own
 > threads — see below).
+> Also apply `supabase/migrations/067_auto_archive_inactivity.sql` (adds the
+> per-account auto-archive settings, the `conversation_message_summary` RPC
+> the sweep reads, and the `auto_archived_at` marker).
 
 ### Added
+
+- **Auto-archive inactive conversations.** **Settings → WhatsApp → Inactive
+  chat auto-archive** closes a thread once it has been quiet for the number
+  of hours you pick (2 by default) and tells the customer the chat was
+  closed and that they can write again whenever they want. Only threads
+  assigned to an agent whose last message came from that agent are swept —
+  a chat the customer is still waiting on stays in the inbox. The notice
+  goes out while the customer's last message is inside Meta's 24-hour
+  window; past that the thread is archived silently, because Meta rejects
+  free-form text out there. The sweep runs from `GET /api/inbox/cron` —
+  point your scheduler at it (it reuses `AUTOMATION_CRON_SECRET`).
 
 - **Archive and delete conversations.** The thread header's **⋯** menu
   offers **Archive conversation** — the chat and its history stay put, but

@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { SettingsPanelHead } from './settings-panel-head';
+import { InboxAutoArchiveSettings } from './inbox-auto-archive';
 import {
   Accordion,
   AccordionItem,
@@ -890,6 +891,11 @@ export function WhatsAppConfig() {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      {/* Inbox lifecycle: auto-archive conversations that go quiet. */}
+      <div className="mt-6">
+        <InboxAutoArchiveSettings />
       </div>
     </section>
   );

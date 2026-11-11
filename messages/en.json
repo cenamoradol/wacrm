@@ -1817,6 +1817,24 @@
       "saveFailed": "Failed to save default currency",
       "saveSuccess": "Default currency updated"
     },
+    "autoArchive": {
+      "title": "Inactive chat auto-archive",
+      "description": "Close conversations that go quiet after an agent replied, and tell the customer they can write again whenever they want.",
+      "enable": "Auto-archive inactive chats",
+      "enableDesc": "When a customer stops replying after an agent answered, the chat is archived once the timeout below runs out.",
+      "hours": "Idle timeout (hours)",
+      "hoursDesc": "How long a thread has to stay silent before it is archived. Fractional values work too (0.5 = 30 minutes).",
+      "message": "Message to the customer",
+      "messagePlaceholder": "Hi! This chat was closed because of inactivity. Feel free to write us again at any time.",
+      "messageDesc": "Sent to the customer when the chat is archived — but only while their last message is less than 24 hours old, because Meta only accepts free-form text inside that window. Older chats are archived without a message.",
+      "adminOnlyHint": "Only account admins can change these settings.",
+      "invalidHours": "Enter a timeout greater than zero.",
+      "loadFailed": "Failed to load the auto-archive settings",
+      "save": "Save",
+      "saving": "Saving...",
+      "saveFailed": "Failed to save the auto-archive settings",
+      "saveSuccess": "Auto-archive settings updated"
+    },
     "aiConfig": {
       "title": "Agent setup",
       "description": "Bring your own OpenAI or Anthropic key. wacrm calls the provider directly with your key — no per-seat AI fees, and your data stays yours. This powers AI-drafted replies in the inbox, the auto-reply bot, and the Playground.",
