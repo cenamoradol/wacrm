@@ -28,6 +28,9 @@ exactly as before — push is opt-in per device, opt-out is one click in
 > `add_account_member` RPC used by the new member-management flow).
 > Also apply `supabase/migrations/065_conversation_archive.sql` (adds the
 > `conversations.archived` flag behind the new archive / delete actions).
+> Also apply `supabase/migrations/066_agent_conversation_scope.sql` (scopes
+> the conversation/message read policies so an agent only sees their own
+> threads — see below).
 
 ### Added
 
@@ -76,6 +79,16 @@ exactly as before — push is opt-in per device, opt-out is one click in
   `connect-src` so the SDK and its telemetry endpoints can load.
 
 ### Changed
+
+- **Agents only work their own conversations.** An agent's inbox now shows
+  the threads assigned to them plus the shared pool of unassigned ones;
+  a thread assigned to a teammate disappears from their inbox. Answering
+  an unassigned thread claims it for the replier, so the other agents
+  stop seeing it. Owners and admins keep seeing every conversation, and
+  viewers keep read-only access to all of them. Enforced in the database
+  (row-level security on `conversations`, `messages` and
+  `message_reactions`), so it also covers the unread badge, deep links,
+  realtime updates and the API routes.
 
 - **Agents and viewers are inbox-only.** The shared inbox stays open to
   every member, but the other sections (dashboard, contacts, pipelines,

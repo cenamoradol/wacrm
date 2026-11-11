@@ -10,10 +10,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Records of what the route wrote, so we can assert the right rows landed.
 const conversationInserts: Array<Record<string, unknown>> = [];
 const messageInserts: Array<Record<string, unknown>> = [];
+// Conversation updates (the "reply claims the thread" write).
+const conversationUpdates: Array<Record<string, unknown>> = [];
 
 // Toggles for the per-test scenario.
 let existingConversation: Record<string, unknown> | null = null;
 let contactRow: Record<string, unknown> | null = null;
+// The caller's account role — decides whether their reply claims the
+// thread. `null` = unknown role (no claim).
+let profileRole: string | null = null;
 // A conversation created during the request becomes retrievable by id —
 // the shared send core re-loads the conversation (with its contact) from
 // just the id, so the mock must model insert-then-select-by-id.
@@ -35,7 +40,7 @@ function makeSupabaseMock() {
     const selectResult = () => {
       switch (table) {
         case 'profiles':
-          return { data: { account_id: 'acct-1' }, error: null };
+          return { data: { account_id: 'acct-1', account_role: profileRole }, error: null };
         case 'contacts':
           return { data: contactRow, error: null };
         case 'conversations':
@@ -90,6 +95,8 @@ function makeSupabaseMock() {
       'select',
       'eq',
       'in',
+      'is',
+      'not',
       'order',
       'limit',
       'update',
@@ -97,6 +104,10 @@ function makeSupabaseMock() {
     ]) {
       b[m] = vi.fn(chain);
     }
+    b.update = vi.fn((payload: Record<string, unknown>) => {
+      if (table === 'conversations') conversationUpdates.push(payload);
+      return b;
+    });
     b.insert = vi.fn((payload: Record<string, unknown>) => {
       didInsert = true;
       if (table === 'conversations') {
@@ -187,9 +198,11 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
   beforeEach(() => {
     conversationInserts.length = 0;
     messageInserts.length = 0;
+    conversationUpdates.length = 0;
     existingConversation = null;
     createdConversation = null;
     contactRow = CONTACT;
+    profileRole = null;
     supabaseMock = makeSupabaseMock();
     sendTemplateMessage.mockClear();
   });
@@ -270,5 +283,76 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
       })
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/whatsapp/send — the reply claims the thread', () => {
+  // The send core also touches the conversation row (last_message_at,
+  // last_message_text) — the claim is the update that carries an
+  // assignee.
+  const claims = () =>
+    conversationUpdates.filter((u) => 'assigned_agent_id' in u);
+
+  beforeEach(() => {
+    conversationInserts.length = 0;
+    messageInserts.length = 0;
+    conversationUpdates.length = 0;
+    existingConversation = null;
+    createdConversation = null;
+    contactRow = CONTACT;
+    profileRole = null;
+    supabaseMock = makeSupabaseMock();
+    sendTemplateMessage.mockClear();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('assigns the conversation to the agent who replied', async () => {
+    profileRole = 'agent';
+    existingConversation = {
+      id: 'conv-existing',
+      account_id: 'acct-1',
+      contact_id: 'contact-1',
+      contact: CONTACT,
+    };
+
+    const res = await postContactTemplate();
+
+    expect(res.status).toBe(200);
+    // The agent now owns the thread — the other agents stop seeing it.
+    expect(claims()).toEqual([{ assigned_agent_id: 'user-1' }]);
+  });
+
+  it('does not claim the thread for an admin', async () => {
+    profileRole = 'admin';
+    existingConversation = {
+      id: 'conv-existing',
+      account_id: 'acct-1',
+      contact_id: 'contact-1',
+      contact: CONTACT,
+    };
+
+    const res = await postContactTemplate();
+
+    expect(res.status).toBe(200);
+    // Admins supervise — their reply leaves the thread in the shared pool.
+    expect(claims()).toEqual([]);
+  });
+
+  it('does not claim the thread when the role is unknown', async () => {
+    profileRole = null;
+    existingConversation = {
+      id: 'conv-existing',
+      account_id: 'acct-1',
+      contact_id: 'contact-1',
+      contact: CONTACT,
+    };
+
+    const res = await postContactTemplate();
+
+    expect(res.status).toBe(200);
+    expect(claims()).toEqual([]);
   });
 });

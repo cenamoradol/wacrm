@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { isAccountRole } from '@/lib/auth/roles';
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -46,7 +47,7 @@ export async function POST(request: Request) {
     // returned nothing for teammates who didn't author the row.
     const { data: profile } = await supabase
       .from('profiles')
-      .select('account_id')
+      .select('account_id, account_role')
       .eq('user_id', user.id)
       .maybeSingle();
     const accountId = profile?.account_id as string | undefined;
@@ -56,6 +57,10 @@ export async function POST(request: Request) {
         { status: 403 }
       );
     }
+    // The caller's role decides whether their reply claims the thread.
+    const role = isAccountRole(profile?.account_role)
+      ? profile.account_role
+      : null;
 
     const body = await request.json();
     const {
@@ -187,6 +192,28 @@ export async function POST(request: Request) {
         // Stamp the agent onto the message so /team can attribute it.
         senderUserId: user.id,
       });
+
+      // The agent who replies owns the thread: claim it so the other
+      // agents stop seeing it in their inbox — replying closes the
+      // shared pool for that conversation. Mirrors
+      // `can_view_conversation()` in migration 066. Owners/admins don't
+      // claim: they supervise, and a test message from an admin
+      // shouldn't pull threads out of the agents' pool.
+      if (role === 'agent') {
+        const { error: claimError } = await supabase
+          .from('conversations')
+          .update({ assigned_agent_id: user.id })
+          .eq('id', conversationId)
+          .eq('account_id', accountId)
+          .is('assigned_agent_id', null);
+        if (claimError) {
+          // The message is already out — a failed claim is not fatal.
+          console.error(
+            '[whatsapp/send] failed to claim conversation:',
+            claimError
+          );
+        }
+      }
 
       return NextResponse.json({
         success: true,
